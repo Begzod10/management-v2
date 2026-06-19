@@ -1,0 +1,201 @@
+import os
+import uuid
+import aiofiles
+from datetime import datetime
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+from sqlalchemy.orm import Session
+from typing import List, Optional
+from app.database import get_db, get_gennis_write_db, get_turon_write_db
+from app.models import Mission, MissionAttachment, User
+from app.schemas import MissionAttachmentOut
+from app.config import settings
+from app.external_models.gennis import GennisMission, GennisMissionAttachment
+from app.external_models.turon import TuronMission, TuronMissionAttachment
+from app.tasks import send_telegram_notification
+from app.services.telegram import tpl_attachment_added
+
+router = APIRouter(prefix="/missions/{mission_id}/attachments", tags=["Mission Attachments"])
+
+UPLOAD_DIR = "uploads/mission_attachments"
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+
+def _file_url(path: Optional[str]) -> Optional[str]:
+    if not path:
+        return path
+    if path.startswith(("http://", "https://")):
+        return path
+    return f"{settings.BASE_URL}/{path}"
+
+
+def _get_mission(db: Session, mission_id: int) -> Mission:
+    mission = db.query(Mission).filter(Mission.id == mission_id, Mission.deleted == False).first()
+    if not mission:
+        raise HTTPException(status_code=404, detail="Mission not found")
+    return mission
+
+
+def _sync_attachment_gennis(mission: Mission, attachment: MissionAttachment, gennis_db: Session, creator_name: Optional[str] = None, deleted: bool = False):
+    if not mission.gennis_executor_id:
+        return
+    ext_mission = gennis_db.query(GennisMission).filter(GennisMission.management_id == mission.id).first()
+    if not ext_mission:
+        return
+    ext = gennis_db.query(GennisMissionAttachment).filter(GennisMissionAttachment.management_id == attachment.id).first()
+    if deleted:
+        if ext:
+            gennis_db.delete(ext)
+            gennis_db.commit()
+        return
+    file_url = f"{settings.BASE_URL}/{attachment.file}" if attachment.file else None
+    if ext:
+        ext.file_path = file_url
+        ext.note = attachment.note
+    else:
+        ext = GennisMissionAttachment(
+            management_id=attachment.id,
+            mission_id=ext_mission.id,
+            file_path=file_url,
+            note=attachment.note,
+            uploaded_at=attachment.uploaded_at,
+            creator_name=creator_name,
+        )
+        gennis_db.add(ext)
+    gennis_db.commit()
+
+
+def _sync_attachment_turon(mission: Mission, attachment: MissionAttachment, turon_db: Session, creator_name: Optional[str] = None, deleted: bool = False):
+    if not mission.turon_executor_id:
+        return
+    ext_mission = turon_db.query(TuronMission).filter(TuronMission.management_id == mission.id).first()
+    if not ext_mission:
+        return
+    ext = turon_db.query(TuronMissionAttachment).filter(TuronMissionAttachment.management_id == attachment.id).first()
+    if deleted:
+        if ext:
+            turon_db.delete(ext)
+            turon_db.commit()
+        return
+    file_url = f"{settings.BASE_URL}/{attachment.file}" if attachment.file else None
+    if ext:
+        ext.file = file_url
+        ext.note = attachment.note
+    else:
+        ext = TuronMissionAttachment(
+            management_id=attachment.id,
+            mission_id=ext_mission.id,
+            file=file_url,
+            note=attachment.note,
+            uploaded_at=attachment.uploaded_at,
+            creator_name=creator_name,
+        )
+        turon_db.add(ext)
+    turon_db.commit()
+
+
+@router.post("/", response_model=MissionAttachmentOut, status_code=201)
+async def upload_attachment(
+    mission_id: int,
+    file: UploadFile = File(...),
+    note: str = Form(None),
+    creator_id: int = Form(...),
+    db: Session = Depends(get_db),
+    gennis_db: Session = Depends(get_gennis_write_db),
+    turon_db: Session = Depends(get_turon_write_db),
+):
+    mission = _get_mission(db, mission_id)
+    ext = os.path.splitext(file.filename)[1]
+    filename = f"{uuid.uuid4()}{ext}"
+    path = os.path.join(UPLOAD_DIR, filename)
+    async with aiofiles.open(path, "wb") as f:
+        await f.write(await file.read())
+    attachment = MissionAttachment(mission_id=mission_id, file=path, note=note)
+    db.add(attachment)
+    db.commit()
+    db.refresh(attachment)
+    user = db.query(User).filter(User.id == creator_id).first()
+    creator_name = f"{user.name} {user.surname}".strip() if user else None
+    _sync_attachment_gennis(mission, attachment, gennis_db, creator_name=creator_name)
+    _sync_attachment_turon(mission, attachment, turon_db, creator_name=creator_name)
+
+    for uid in {mission.executor_id, mission.reviewer_id, mission.creator_id} - {creator_id}:
+        if uid:
+            u = db.query(User).filter(User.id == uid).first()
+            if u and u.telegram_id:
+                recipient_name = f"{u.name} {u.surname}".strip() if u.surname else u.name
+                send_telegram_notification.delay(
+                    u.telegram_id,
+                    tpl_attachment_added(recipient_name, mission.title, creator_name or "—"),
+                )
+
+    out = MissionAttachmentOut.model_validate(attachment)
+    out.file = _file_url(out.file)
+    return out
+
+
+@router.get("/", response_model=List[MissionAttachmentOut])
+def list_attachments(mission_id: int, db: Session = Depends(get_db)):
+    _get_mission(db, mission_id)
+    rows = db.query(MissionAttachment).filter(
+        MissionAttachment.mission_id == mission_id, MissionAttachment.deleted == False
+    ).all()
+    result = []
+    for row in rows:
+        out = MissionAttachmentOut.model_validate(row)
+        out.file = _file_url(out.file)
+        result.append(out)
+    return result
+
+
+@router.patch("/{attachment_id}", response_model=MissionAttachmentOut)
+async def update_attachment(
+    mission_id: int,
+    attachment_id: int,
+    file: Optional[UploadFile] = File(None),
+    note: Optional[str] = Form(None),
+    db: Session = Depends(get_db),
+    gennis_db: Session = Depends(get_gennis_write_db),
+    turon_db: Session = Depends(get_turon_write_db),
+):
+    mission = _get_mission(db, mission_id)
+    attachment = db.query(MissionAttachment).filter(
+        MissionAttachment.id == attachment_id, MissionAttachment.mission_id == mission_id, MissionAttachment.deleted == False
+    ).first()
+    if not attachment:
+        raise HTTPException(status_code=404, detail="Attachment not found")
+    if file:
+        ext = os.path.splitext(file.filename)[1]
+        filename = f"{uuid.uuid4()}{ext}"
+        path = os.path.join(UPLOAD_DIR, filename)
+        async with aiofiles.open(path, "wb") as f:
+            await f.write(await file.read())
+        attachment.file = path
+    if note is not None:
+        attachment.note = note
+    db.commit()
+    db.refresh(attachment)
+    _sync_attachment_gennis(mission, attachment, gennis_db)
+    _sync_attachment_turon(mission, attachment, turon_db)
+    out = MissionAttachmentOut.model_validate(attachment)
+    out.file = _file_url(out.file)
+    return out
+
+
+@router.delete("/{attachment_id}", status_code=204)
+def delete_attachment(
+    mission_id: int,
+    attachment_id: int,
+    db: Session = Depends(get_db),
+    gennis_db: Session = Depends(get_gennis_write_db),
+    turon_db: Session = Depends(get_turon_write_db),
+):
+    mission = _get_mission(db, mission_id)
+    attachment = db.query(MissionAttachment).filter(
+        MissionAttachment.id == attachment_id, MissionAttachment.mission_id == mission_id, MissionAttachment.deleted == False
+    ).first()
+    if not attachment:
+        raise HTTPException(status_code=404, detail="Attachment not found")
+    _sync_attachment_gennis(mission, attachment, gennis_db, deleted=True)
+    _sync_attachment_turon(mission, attachment, turon_db, deleted=True)
+    attachment.deleted = True
+    db.commit()
