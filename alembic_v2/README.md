@@ -25,23 +25,23 @@ DATABASE_URL_V2=postgresql://postgres:<password>@localhost:5432/management-v2
 
 ## Common Commands
 
-Always use `-c alembic_v2.ini` to target the correct database.
+Use `make` targets instead of running `alembic` directly — they ensure the correct `-c` flag is always used.
 
 ```bash
-# Apply all pending migrations
+make v2-upgrade      # apply all pending migrations
+make v2-current      # show current revision
+make v2-history      # show full migration history
+make v2-check        # check for schema drift (read-only, safe)
+make v2-downgrade    # roll back one migration
+make v2-migrate      # autogenerate a new migration (prompts for message)
+make v2-merge        # resolve multiple heads (see Team Workflow below)
+```
+
+Raw alembic equivalents (if make is not available):
+```bash
 alembic -c alembic_v2.ini upgrade head
-
-# Check current revision in the DB
-alembic -c alembic_v2.ini current
-
-# Show migration history
-alembic -c alembic_v2.ini history
-
-# Check for schema drift (safe, read-only)
-alembic -c alembic_v2.ini check
-
-# Roll back one migration
-alembic -c alembic_v2.ini downgrade -1
+alembic -c alembic_v2.ini revision --autogenerate -m "my change"
+alembic -c alembic_v2.ini merge heads -m "merge"
 ```
 
 ---
@@ -94,6 +94,31 @@ defined in `BaseV2` (`app/gennis_v2_models.py`).
 | `gennis_student_payment` | `GennisStudentPayment` | Payment records per student |
 | `gennis_attendance_history_student` | `GennisAttendanceHistoryStudent` | Monthly debt/payment tracking per student per group |
 | `gennis_student_credit` | `GennisStudentCredit` | Credit balance (overpayment) per student |
+
+---
+
+## Team Workflow — Avoiding Migration Conflicts
+
+When two developers create a migration from the same head simultaneously,
+alembic ends up with two heads and `upgrade head` fails.
+
+**How to detect:**
+```bash
+make v2-history   # shows branched history with multiple (head) markers
+```
+
+**How to fix:**
+```bash
+make v2-merge     # creates a merge migration joining both heads
+make v2-upgrade   # apply the merge + any pending migrations
+git add alembic_v2/versions/
+git commit -m "chore(migrations): merge heads"
+```
+
+**How to prevent:**
+- Always `git pull` before creating a new migration
+- Run `make v2-current` to confirm you're on the latest head
+- Coordinate with teammates when both need schema changes at the same time
 
 ---
 
