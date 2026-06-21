@@ -73,14 +73,17 @@ jobs:
 
           rm -f ~/.ssh/deploy_key
 
-          # Log'ni faylga yozish (maxsus belgilar JSON'ni buzmasin)
+          # Log'ni faylga yozish
           echo "$LOG" > /tmp/deploy.log
+          echo "=== LOG (first 5 lines) ===" && head -5 /tmp/deploy.log || echo "(empty)"
 
+          # Telegraph sahifasi yaratish — stderr ham ko'rinsin
           DEPLOY_TITLE="Deploy xato — $(date '+%Y-%m-%d %H:%M')" \
           TELEGRAPH_TOKEN="${TELEGRAPH_TOKEN}" \
-          python3 .github/scripts/post_telegraph.py /tmp/deploy.log > /tmp/tg_url.txt
+          python3 -u .github/scripts/post_telegraph.py /tmp/deploy.log 2>&1 | tee /tmp/tg_url.txt
 
-          URL=$(cat /tmp/tg_url.txt)
+          URL=$(tail -1 /tmp/tg_url.txt)
+          echo "=== Telegraph URL: $URL ==="
           echo "url=$URL" >> $GITHUB_OUTPUT
 
       # ── Telegram: muvaffaqiyatli ─────────────────────────────────────────────
