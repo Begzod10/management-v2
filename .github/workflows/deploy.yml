@@ -71,22 +71,8 @@ jobs:
 
           rm -f ~/.ssh/deploy_key
 
-          # Python scriptni faylga yozish (YAML ichida inline yozib bo'lmaydi)
-          cat > /tmp/make_telegraph.py << 'PYEOF'
-import sys, json
-log = sys.stdin.read()
-nodes = []
-for line in log.splitlines():
-    line = line.strip()
-    if line:
-        nodes.append({"tag": "p", "children": [line[:512]]})
-if not nodes:
-    nodes = [{"tag": "p", "children": ["Log topilmadi"]}]
-print(json.dumps(nodes))
-PYEOF
-
           TITLE="Deploy xato — $(date '+%Y-%m-%d %H:%M')"
-          CONTENT=$(echo "$LOG" | python3 /tmp/make_telegraph.py)
+          CONTENT=$(echo "$LOG" | python3 .github/scripts/make_telegraph.py)
 
           RESPONSE=$(curl -s -X POST "https://api.telegra.ph/createPage" \
             -H "Content-Type: application/json" \
