@@ -71,14 +71,14 @@ jobs:
 
           rm -f ~/.ssh/deploy_key
 
-          TITLE="Deploy xato — $(date '+%Y-%m-%d %H:%M')"
-          CONTENT=$(echo "$LOG" | python3 .github/scripts/make_telegraph.py)
+          # Log'ni faylga yozish (maxsus belgilar JSON'ni buzmasin)
+          echo "$LOG" > /tmp/deploy.log
 
-          RESPONSE=$(curl -s -X POST "https://api.telegra.ph/createPage" \
-            -H "Content-Type: application/json" \
-            -d "{\"access_token\":\"${TELEGRAPH_TOKEN}\",\"title\":\"${TITLE}\",\"content\":${CONTENT}}")
+          DEPLOY_TITLE="Deploy xato — $(date '+%Y-%m-%d %H:%M')" \
+          TELEGRAPH_TOKEN="${TELEGRAPH_TOKEN}" \
+          python3 .github/scripts/post_telegraph.py /tmp/deploy.log > /tmp/tg_url.txt
 
-          URL=$(echo "$RESPONSE" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['result']['url'] if d.get('ok') else 'https://telegra.ph')")
+          URL=$(cat /tmp/tg_url.txt)
           echo "url=$URL" >> $GITHUB_OUTPUT
 
       # ── Telegram: muvaffaqiyatli ─────────────────────────────────────────────

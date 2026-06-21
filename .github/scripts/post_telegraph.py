@@ -1,0 +1,47 @@
+"""
+Reads deploy log from a file, posts it to Telegraph, prints the page URL.
+Usage: python3 post_telegraph.py <log_file>
+Env:   TELEGRAPH_TOKEN, DEPLOY_TITLE
+"""
+import json
+import os
+import sys
+import urllib.request
+
+token = os.environ["TELEGRAPH_TOKEN"]
+title = os.environ.get("DEPLOY_TITLE", "Deploy Error")
+
+log_file = sys.argv[1] if len(sys.argv) > 1 else None
+if log_file and os.path.exists(log_file):
+    with open(log_file, "r", errors="replace") as f:
+        log = f.read()
+else:
+    log = "Log topilmadi"
+
+nodes = []
+for line in log.splitlines():
+    line = line.strip()
+    if line:
+        nodes.append({"tag": "p", "children": [line[:512]]})
+if not nodes:
+    nodes = [{"tag": "p", "children": ["Log topilmadi"]}]
+
+payload = json.dumps({
+    "access_token": token,
+    "title": title,
+    "content": nodes,
+    "return_content": False,
+}).encode("utf-8")
+
+try:
+    req = urllib.request.Request(
+        "https://api.telegra.ph/createPage",
+        data=payload,
+        headers={"Content-Type": "application/json"},
+    )
+    with urllib.request.urlopen(req, timeout=15) as resp:
+        data = json.loads(resp.read())
+    print(data["result"]["url"] if data.get("ok") else "https://telegra.ph")
+except Exception as e:
+    print("https://telegra.ph", file=sys.stderr)
+    print("https://telegra.ph")
