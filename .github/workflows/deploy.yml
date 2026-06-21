@@ -4,10 +4,6 @@ on:
   push:
     branches: [master]
 
-env:
-  TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-  TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-
 jobs:
   deploy:
     name: Deploy to production
@@ -17,7 +13,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # ── SSH into server, pull code, rebuild, migrate ─────────────────────────
       - name: Deploy via SSH
         id: deploy
         uses: appleboy/ssh-action@v1.0.3
@@ -29,7 +24,6 @@ jobs:
             set -e
             APP_DIR=/home/managementv2
 
-            # First-time clone
             if [ ! -d "$APP_DIR/.git" ]; then
               git clone ${{ secrets.GIT_REPO_URL }} "$APP_DIR"
             fi
@@ -38,10 +32,8 @@ jobs:
             git fetch origin master
             git reset --hard origin/master
 
-            # Rebuild images and restart containers
             docker compose up --build -d
 
-            # Wait for app to be healthy
             echo "Waiting for app to start..."
             for i in $(seq 1 12); do
               if docker compose exec -T app curl -sf http://localhost:8000/ > /dev/null 2>&1; then
@@ -52,50 +44,35 @@ jobs:
               sleep 5
             done
 
-            # Run alembic migrations (v2 chain — committed to repo)
             docker compose exec -T app alembic -c alembic_v2.ini upgrade head
-
-            # Prune dangling images to save disk space
             docker image prune -f
 
-      # ── Telegram: success ────────────────────────────────────────────────────
       - name: Notify Telegram — success
         if: success()
+        env:
+          BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          ACTOR: ${{ github.actor }}
+          SHA: ${{ github.sha }}
+          COMMIT_MSG: ${{ github.event.head_commit.message }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          COMMIT_MSG=$(echo "${{ github.event.head_commit.message }}" | head -1 | cut -c1-100)
-          SHORT_SHA="${{ github.sha }}"
-          SHORT_SHA="${SHORT_SHA:0:7}"
+          SHORT_SHA="${SHA:0:7}"
+          MSG="✅ Deploy muvaffaqiyatli!%0A%0A🌐 management.gennis.uz%0A🌿 Branch: master%0A📝 Commit: ${SHORT_SHA}%0A👤 ${ACTOR}%0A💬 ${COMMIT_MSG}%0A%0A🔗 ${RUN_URL}"
+          curl -s -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
+            -d "chat_id=${CHAT_ID}&parse_mode=HTML&text=${MSG}"
 
-          curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
-            --data-urlencode "chat_id=${TELEGRAM_CHAT_ID}" \
-            --data-urlencode "parse_mode=HTML" \
-            --data-urlencode "text=✅ <b>Deploy muvaffaqiyatli!</b>
-
-🌐 <b>management.gennis.uz</b>
-🌿 Branch: <code>master</code>
-📝 Commit: <code>${SHORT_SHA}</code>
-👤 Kimdan: <b>${{ github.actor }}</b>
-💬 ${COMMIT_MSG}
-
-🔗 <a href='${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}'>GitHub Actions</a>"
-
-      # ── Telegram: failure ────────────────────────────────────────────────────
       - name: Notify Telegram — failure
         if: failure()
+        env:
+          BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          ACTOR: ${{ github.actor }}
+          SHA: ${{ github.sha }}
+          COMMIT_MSG: ${{ github.event.head_commit.message }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          COMMIT_MSG=$(echo "${{ github.event.head_commit.message }}" | head -1 | cut -c1-100)
-          SHORT_SHA="${{ github.sha }}"
-          SHORT_SHA="${SHORT_SHA:0:7}"
-
-          curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
-            --data-urlencode "chat_id=${TELEGRAM_CHAT_ID}" \
-            --data-urlencode "parse_mode=HTML" \
-            --data-urlencode "text=❌ <b>Deploy MUVAFFAQIYATSIZ!</b>
-
-🌐 <b>management.gennis.uz</b>
-🌿 Branch: <code>master</code>
-📝 Commit: <code>${SHORT_SHA}</code>
-👤 Kimdan: <b>${{ github.actor }}</b>
-💬 ${COMMIT_MSG}
-
-🔗 <a href='${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}'>⚠️ Log ko'rish</a>"
+          SHORT_SHA="${SHA:0:7}"
+          MSG="❌ Deploy MUVAFFAQIYATSIZ!%0A%0A🌐 management.gennis.uz%0A🌿 Branch: master%0A📝 Commit: ${SHORT_SHA}%0A👤 ${ACTOR}%0A💬 ${COMMIT_MSG}%0A%0A⚠️ Log: ${RUN_URL}"
+          curl -s -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
+            -d "chat_id=${CHAT_ID}&parse_mode=HTML&text=${MSG}"
