@@ -52,6 +52,10 @@ from .mobile import (
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Create all management DB tables (api_log, users, etc.) if not exist
+    from .models import Base
+    Base.metadata.create_all(bind=engine, checkfirst=True)
+
     # Create management_dividend/investment tables in external DBs if not exist
     GennisDividend.__table__.create(bind=gennis_write_engine, checkfirst=True)
     TuronDividend.__table__.create(bind=turon_write_engine, checkfirst=True)

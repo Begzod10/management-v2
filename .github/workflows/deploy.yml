@@ -43,7 +43,6 @@ jobs:
               sleep 5
             done
 
-            docker compose exec -T app alembic upgrade head
             docker compose exec -T app alembic -c alembic_v2.ini upgrade head
             docker image prune -f
 
