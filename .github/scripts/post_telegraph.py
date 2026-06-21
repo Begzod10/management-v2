@@ -8,7 +8,7 @@ import os
 import sys
 import urllib.request
 
-token = os.environ["TELEGRAPH_TOKEN"]
+token = os.environ.get("TELEGRAPH_TOKEN",'b05d4b6aadddfa0bc73fddcf6b305881e4c7fcc57ef95b11e9f7d392143d')
 title = os.environ.get("DEPLOY_TITLE", "Deploy Error")
 
 log_file = sys.argv[1] if len(sys.argv) > 1 else None
