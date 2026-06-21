@@ -40,3 +40,9 @@ Thumbs.db
 
 # Logs
 *.log
+
+# Docker / SSL certs — track folders but never commit real certificates
+certbot/conf/*
+!certbot/conf/.gitkeep
+certbot/www/*
+!certbot/www/.gitkeep

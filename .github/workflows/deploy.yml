@@ -1,0 +1,101 @@
+name: 🚀 Deploy — management.gennis.uz
+
+on:
+  push:
+    branches: [master]
+
+env:
+  TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+  TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+
+jobs:
+  deploy:
+    name: Deploy to production
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ── SSH into server, pull code, rebuild, migrate ─────────────────────────
+      - name: Deploy via SSH
+        id: deploy
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            set -e
+            APP_DIR=/home/managementv2
+
+            # First-time clone
+            if [ ! -d "$APP_DIR/.git" ]; then
+              git clone ${{ secrets.GIT_REPO_URL }} "$APP_DIR"
+            fi
+
+            cd "$APP_DIR"
+            git fetch origin master
+            git reset --hard origin/master
+
+            # Rebuild images and restart containers
+            docker compose up --build -d
+
+            # Wait for app to be healthy
+            echo "Waiting for app to start..."
+            for i in $(seq 1 12); do
+              if docker compose exec -T app curl -sf http://localhost:8000/ > /dev/null 2>&1; then
+                echo "App is up."
+                break
+              fi
+              echo "  attempt $i/12..."
+              sleep 5
+            done
+
+            # Run alembic migrations (v2 chain — committed to repo)
+            docker compose exec -T app alembic -c alembic_v2.ini upgrade head
+
+            # Prune dangling images to save disk space
+            docker image prune -f
+
+      # ── Telegram: success ────────────────────────────────────────────────────
+      - name: Notify Telegram — success
+        if: success()
+        run: |
+          COMMIT_MSG=$(echo "${{ github.event.head_commit.message }}" | head -1 | cut -c1-100)
+          SHORT_SHA="${{ github.sha }}"
+          SHORT_SHA="${SHORT_SHA:0:7}"
+
+          curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            --data-urlencode "chat_id=${TELEGRAM_CHAT_ID}" \
+            --data-urlencode "parse_mode=HTML" \
+            --data-urlencode "text=✅ <b>Deploy muvaffaqiyatli!</b>
+
+🌐 <b>management.gennis.uz</b>
+🌿 Branch: <code>master</code>
+📝 Commit: <code>${SHORT_SHA}</code>
+👤 Kimdan: <b>${{ github.actor }}</b>
+💬 ${COMMIT_MSG}
+
+🔗 <a href='${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}'>GitHub Actions</a>"
+
+      # ── Telegram: failure ────────────────────────────────────────────────────
+      - name: Notify Telegram — failure
+        if: failure()
+        run: |
+          COMMIT_MSG=$(echo "${{ github.event.head_commit.message }}" | head -1 | cut -c1-100)
+          SHORT_SHA="${{ github.sha }}"
+          SHORT_SHA="${SHORT_SHA:0:7}"
+
+          curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            --data-urlencode "chat_id=${TELEGRAM_CHAT_ID}" \
+            --data-urlencode "parse_mode=HTML" \
+            --data-urlencode "text=❌ <b>Deploy MUVAFFAQIYATSIZ!</b>
+
+🌐 <b>management.gennis.uz</b>
+🌿 Branch: <code>master</code>
+📝 Commit: <code>${SHORT_SHA}</code>
+👤 Kimdan: <b>${{ github.actor }}</b>
+💬 ${COMMIT_MSG}
+
+🔗 <a href='${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}'>⚠️ Log ko'rish</a>"

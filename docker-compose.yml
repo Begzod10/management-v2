@@ -1,0 +1,127 @@
+version: "3.9"
+
+# ─── Port security ────────────────────────────────────────────────────────────
+# Only nginx exposes ports 80/443 to the host.
+# PostgreSQL (5432) and Redis (6379) have NO host-port bindings — they are
+# reachable only on the internal "backend" network between containers.
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+
+  # ── FastAPI app ──────────────────────────────────────────────────────────────
+  # extra_hosts maps host.docker.internal → host gateway so the container can
+  # reach Gennis and Turon PostgreSQL instances running on the host (127.0.0.1).
+  app:
+    build: .
+    container_name: management_app
+    restart: unless-stopped
+    env_file: .env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./static:/app/static
+      - ./uploads:/app/uploads
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ── Celery worker ────────────────────────────────────────────────────────────
+  celery:
+    build: .
+    container_name: management_celery
+    restart: unless-stopped
+    command: celery -A app.celery_app worker --loglevel=info -Q celery
+    env_file: .env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./uploads:/app/uploads
+    depends_on:
+      - app
+      - redis
+    networks:
+      - backend
+
+  # ── Celery beat (cron scheduler) ─────────────────────────────────────────────
+  celery-beat:
+    build: .
+    container_name: management_celery_beat
+    restart: unless-stopped
+    command: celery -A app.celery_app beat --loglevel=info
+    env_file: .env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - celery
+      - redis
+    networks:
+      - backend
+
+  # ── PostgreSQL — management DB ───────────────────────────────────────────────
+  # ⛔ NO ports: section → never exposed to the internet
+  db:
+    image: postgres:15-alpine
+    container_name: management_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-management}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - backend
+
+  # ── Redis — broker + result backend ─────────────────────────────────────────
+  # ⛔ NO ports: section → never exposed to the internet
+  redis:
+    image: redis:7-alpine
+    container_name: management_redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    networks:
+      - backend
+
+  # ── Nginx reverse proxy ──────────────────────────────────────────────────────
+  # Only service with host-port bindings (80 + 443)
+  nginx:
+    image: nginx:1.25-alpine
+    container_name: management_nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx:/etc/nginx/conf.d:ro
+      - ./certbot/conf:/etc/letsencrypt:ro
+      - ./certbot/www:/var/www/certbot:ro
+      - ./static:/var/www/static:ro
+      - ./uploads:/var/www/uploads:ro
+    depends_on:
+      - app
+    networks:
+      - backend
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  backend:
+    driver: bridge
