@@ -1,16 +1,10 @@
-version: "3.9"
-
 # ─── Port security ────────────────────────────────────────────────────────────
-# Only nginx exposes ports 80/443 to the host.
-# PostgreSQL (5432) and Redis (6379) have NO host-port bindings — they are
-# reachable only on the internal "backend" network between containers.
+# System nginx (host) handles 80/443 and proxies to app on 127.0.0.1:8000.
+# PostgreSQL (5432) and Redis (6379) have NO host-port bindings.
 # ─────────────────────────────────────────────────────────────────────────────
 
 services:
 
-  # ── FastAPI app ──────────────────────────────────────────────────────────────
-  # extra_hosts maps host.docker.internal → host gateway so the container can
-  # reach Gennis and Turon PostgreSQL instances running on the host (127.0.0.1).
   app:
     build: .
     container_name: management_app
@@ -18,6 +12,8 @@ services:
     env_file: .env
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    ports:
+      - "127.0.0.1:8000:8000"
     volumes:
       - ./static:/app/static
       - ./uploads:/app/uploads
@@ -34,7 +30,6 @@ services:
       timeout: 10s
       retries: 3
 
-  # ── Celery worker ────────────────────────────────────────────────────────────
   celery:
     build: .
     container_name: management_celery
@@ -51,7 +46,6 @@ services:
     networks:
       - backend
 
-  # ── Celery beat (cron scheduler) ─────────────────────────────────────────────
   celery-beat:
     build: .
     container_name: management_celery_beat
@@ -66,8 +60,7 @@ services:
     networks:
       - backend
 
-  # ── PostgreSQL — management DB ───────────────────────────────────────────────
-  # ⛔ NO ports: section → never exposed to the internet
+  # ⛔ NO ports — only reachable inside Docker network
   db:
     image: postgres:15-alpine
     container_name: management_db
@@ -86,8 +79,7 @@ services:
     networks:
       - backend
 
-  # ── Redis — broker + result backend ─────────────────────────────────────────
-  # ⛔ NO ports: section → never exposed to the internet
+  # ⛔ NO ports — only reachable inside Docker network
   redis:
     image: redis:7-alpine
     container_name: management_redis
@@ -95,26 +87,6 @@ services:
     command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
     volumes:
       - redis_data:/data
-    networks:
-      - backend
-
-  # ── Nginx reverse proxy ──────────────────────────────────────────────────────
-  # Only service with host-port bindings (80 + 443)
-  nginx:
-    image: nginx:1.25-alpine
-    container_name: management_nginx
-    restart: unless-stopped
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./nginx:/etc/nginx/conf.d:ro
-      - ./certbot/conf:/etc/letsencrypt:ro
-      - ./certbot/www:/var/www/certbot:ro
-      - ./static:/var/www/static:ro
-      - ./uploads:/var/www/uploads:ro
-    depends_on:
-      - app
     networks:
       - backend
 
