@@ -23,6 +23,8 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
             set -e
+            echo "TEST: intentional failure"
+            exit 1
             APP_DIR=/home/managementv2
 
             if [ ! -d "$APP_DIR/.git" ]; then
