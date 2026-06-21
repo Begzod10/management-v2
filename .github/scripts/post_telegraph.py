@@ -40,8 +40,14 @@ try:
         headers={"Content-Type": "application/json"},
     )
     with urllib.request.urlopen(req, timeout=15) as resp:
-        data = json.loads(resp.read())
-    print(data["result"]["url"] if data.get("ok") else "https://telegra.ph")
+        raw = resp.read()
+    print(f"Telegraph raw response: {raw.decode()}", file=sys.stderr)
+    data = json.loads(raw)
+    if data.get("ok"):
+        print(data["result"]["url"])
+    else:
+        print(f"Telegraph API error: {data}", file=sys.stderr)
+        print("https://telegra.ph")
 except Exception as e:
-    print("https://telegra.ph", file=sys.stderr)
+    print(f"Exception: {type(e).__name__}: {e}", file=sys.stderr)
     print("https://telegra.ph")
