@@ -686,3 +686,294 @@ class GennisLead(Base):
     deleted       = Column(Boolean, default=False)
     created_at    = Column(DateTime, server_default=func.now())
     updated_at    = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
+# ── Gennis Sync Wave 2: locations, users, staff, timetable ───────────────────
+
+class GennisLocation(Base):
+    __tablename__ = "gennis_location"
+
+    id          = Column(BigInteger, primary_key=True, index=True)
+    gennis_id   = Column(Integer, nullable=False, unique=True)
+    name        = Column(String(255), nullable=True)
+    code        = Column(Integer, nullable=True)
+    address     = Column(String(500), nullable=True)
+    synced_at   = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
+class GennisEducationLanguage(Base):
+    __tablename__ = "gennis_education_language"
+
+    id        = Column(BigInteger, primary_key=True, index=True)
+    gennis_id = Column(Integer, nullable=False, unique=True)
+    name      = Column(String(100), nullable=False)
+    synced_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
+class GennisProfessionSync(Base):
+    __tablename__ = "gennis_profession"
+
+    id        = Column(BigInteger, primary_key=True, index=True)
+    gennis_id = Column(Integer, nullable=False, unique=True)
+    name      = Column(String(255), nullable=False)
+    synced_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
+class GennisRoleSync(Base):
+    __tablename__ = "gennis_role"
+
+    id        = Column(BigInteger, primary_key=True, index=True)
+    gennis_id = Column(Integer, nullable=False, unique=True)
+    role      = Column(String(100), nullable=True)
+    type_role = Column(String(100), nullable=True)
+    synced_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
+class GennisCalendarYear(Base):
+    __tablename__ = "gennis_calendar_year"
+
+    id        = Column(BigInteger, primary_key=True, index=True)
+    gennis_id = Column(Integer, nullable=False, unique=True)
+    date      = Column(DateTime, nullable=True)
+    synced_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
+class GennisCalendarMonth(Base):
+    __tablename__ = "gennis_calendar_month"
+
+    id             = Column(BigInteger, primary_key=True, index=True)
+    gennis_id      = Column(Integer, nullable=False, unique=True)
+    date           = Column(DateTime, nullable=True)
+    year_gennis_id = Column(Integer, nullable=True)
+    synced_at      = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
+class GennisCalendarDay(Base):
+    __tablename__ = "gennis_calendar_day"
+
+    id        = Column(BigInteger, primary_key=True, index=True)
+    gennis_id = Column(Integer, nullable=False, unique=True)
+    date      = Column(DateTime, nullable=True)
+    synced_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
+class GennisUserSync(Base):
+    __tablename__ = "gennis_user"
+
+    id                     = Column(BigInteger, primary_key=True, index=True)
+    gennis_id              = Column(Integer, nullable=False, unique=True)
+    name                   = Column(String(255), nullable=True)
+    surname                = Column(String(255), nullable=True)
+    father_name            = Column(String(255), nullable=True)
+    username               = Column(String(100), nullable=True)
+    age                    = Column(Integer, nullable=True)
+    location_id            = Column(Integer, nullable=True)
+    role_id                = Column(Integer, nullable=True)
+    education_language_id  = Column(Integer, nullable=True)
+    photo_profile          = Column(String(500), nullable=True)
+    balance                = Column(Integer, nullable=True)
+    deleted                = Column(Boolean, default=False)
+    level                  = Column(Integer, nullable=True)
+    calendar_day_gennis_id = Column(Integer, nullable=True)
+    synced_at              = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
+class GennisTeacherSync(Base):
+    __tablename__ = "gennis_teacher"
+
+    id             = Column(BigInteger, primary_key=True, index=True)
+    gennis_id      = Column(Integer, nullable=False, unique=True)
+    user_gennis_id = Column(Integer, nullable=True)
+    name           = Column(String(255), nullable=True)
+    surname        = Column(String(255), nullable=True)
+    username       = Column(String(100), nullable=True)
+    age            = Column(Integer, nullable=True)
+    photo_profile  = Column(String(500), nullable=True)
+    language_name  = Column(String(100), nullable=True)
+    table_color    = Column(String(50), nullable=True)
+    total_students = Column(Integer, nullable=True)
+    is_active      = Column(Boolean, default=True)
+    reg_date       = Column(DateTime, nullable=True)
+    synced_at      = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
+class GennisStaffSync(Base):
+    __tablename__ = "gennis_staff"
+
+    id              = Column(BigInteger, primary_key=True, index=True)
+    gennis_id       = Column(Integer, nullable=False, unique=True)
+    user_gennis_id  = Column(Integer, nullable=True)
+    name            = Column(String(255), nullable=True)
+    surname         = Column(String(255), nullable=True)
+    username        = Column(String(100), nullable=True)
+    age             = Column(Integer, nullable=True)
+    photo_profile   = Column(String(500), nullable=True)
+    language_name   = Column(String(100), nullable=True)
+    role_name       = Column(String(100), nullable=True)
+    type_role       = Column(String(100), nullable=True)
+    profession_id   = Column(Integer, nullable=True)
+    profession_name = Column(String(255), nullable=True)
+    location_id     = Column(Integer, nullable=True)
+    level           = Column(Integer, nullable=True)
+    deleted         = Column(Boolean, default=False)
+    deleted_comment = Column(String(500), nullable=True)
+    reg_date        = Column(DateTime, nullable=True)
+    synced_at       = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
+class GennisAssistentSync(Base):
+    __tablename__ = "gennis_assistent"
+
+    id                = Column(BigInteger, primary_key=True, index=True)
+    gennis_id         = Column(Integer, nullable=False, unique=True)
+    user_gennis_id    = Column(Integer, nullable=True)
+    teacher_gennis_id = Column(Integer, nullable=True)
+    name              = Column(String(255), nullable=True)
+    surname           = Column(String(255), nullable=True)
+    username          = Column(String(100), nullable=True)
+    age               = Column(Integer, nullable=True)
+    photo_profile     = Column(String(500), nullable=True)
+    language_name     = Column(String(100), nullable=True)
+    location_id       = Column(Integer, nullable=True)
+    deleted           = Column(Boolean, default=False)
+    synced_at         = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
+class GennisRoomSync(Base):
+    __tablename__ = "gennis_room"
+
+    id          = Column(BigInteger, primary_key=True, index=True)
+    gennis_id   = Column(Integer, nullable=False, unique=True)
+    name        = Column(String(255), nullable=True)
+    capacity    = Column(Integer, nullable=True)
+    location_id = Column(Integer, nullable=True)
+    deleted     = Column(Boolean, default=False)
+    synced_at   = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
+class GennisWeekSync(Base):
+    __tablename__ = "gennis_week"
+
+    id          = Column(BigInteger, primary_key=True, index=True)
+    gennis_id   = Column(Integer, nullable=False, unique=True)
+    name        = Column(String(100), nullable=True)
+    eng_name    = Column(String(50), nullable=True)
+    order       = Column(Integer, nullable=True)
+    location_id = Column(Integer, nullable=True)
+    synced_at   = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
+class GennisGroupRoomWeekSync(Base):
+    """Denormalized timetable snapshot — sync job fills all name/teacher fields."""
+    __tablename__ = "gennis_group_room_week"
+
+    id                  = Column(BigInteger, primary_key=True, index=True)
+    gennis_id           = Column(Integer, nullable=False, unique=True)
+    group_gennis_id     = Column(Integer, nullable=True)
+    room_gennis_id      = Column(Integer, nullable=True)
+    week_gennis_id      = Column(Integer, nullable=True)
+    location_id         = Column(Integer, nullable=True)
+    start_time          = Column(String(20), nullable=True)
+    end_time            = Column(String(20), nullable=True)
+    group_name          = Column(String(255), nullable=True)
+    subject_name        = Column(String(255), nullable=True)
+    room_name           = Column(String(255), nullable=True)
+    week_name           = Column(String(100), nullable=True)
+    week_order          = Column(Integer, nullable=True)
+    teacher_gennis_id   = Column(Integer, nullable=True)
+    teacher_name        = Column(String(255), nullable=True)
+    teacher_surname     = Column(String(255), nullable=True)
+    assistent_gennis_id = Column(Integer, nullable=True)
+    assistent_name      = Column(String(255), nullable=True)
+    synced_at           = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
+# Teacher junction tables (store raw gennis IDs — no FK constraints)
+gennis_teacher_location_table = Table(
+    "gennis_teacher_location", Base.metadata,
+    Column("teacher_gennis_id", Integer, nullable=False),
+    Column("location_id", Integer, nullable=False),
+    UniqueConstraint("teacher_gennis_id", "location_id", name="uq_gtl_teacher_location"),
+)
+
+gennis_teacher_subject_link_table = Table(
+    "gennis_teacher_subject_link", Base.metadata,
+    Column("teacher_gennis_id", Integer, nullable=False),
+    Column("subject_gennis_id", Integer, nullable=False),
+    UniqueConstraint("teacher_gennis_id", "subject_gennis_id", name="uq_gtsl_teacher_subject"),
+)
+
+gennis_teacher_group_link_table = Table(
+    "gennis_teacher_group_link", Base.metadata,
+    Column("teacher_gennis_id", Integer, nullable=False),
+    Column("group_gennis_id", Integer, nullable=False),
+    UniqueConstraint("teacher_gennis_id", "group_gennis_id", name="uq_gtgl_teacher_group"),
+)
+
+
+# Statistics tables (needed for teachers module statistics endpoints)
+
+class GennisAttendanceSync(Base):
+    __tablename__ = "gennis_attendance"
+
+    id                       = Column(BigInteger, primary_key=True, index=True)
+    gennis_id                = Column(Integer, nullable=False, unique=True)
+    student_gennis_id        = Column(Integer, nullable=True)
+    teacher_gennis_id        = Column(Integer, nullable=True)
+    group_gennis_id          = Column(Integer, nullable=True)
+    subject_gennis_id        = Column(Integer, nullable=True)
+    location_id              = Column(Integer, nullable=True)
+    calendar_month_gennis_id = Column(Integer, nullable=True)
+    calendar_year_gennis_id  = Column(Integer, nullable=True)
+    ball_percentage          = Column(Integer, nullable=True)
+    synced_at                = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
+class GennisGroupReasonSync(Base):
+    __tablename__ = "gennis_group_reason"
+
+    id        = Column(BigInteger, primary_key=True, index=True)
+    gennis_id = Column(Integer, nullable=False, unique=True)
+    reason    = Column(String(500), nullable=True)
+    synced_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
+class GennisTeacherGroupStatisticsSync(Base):
+    __tablename__ = "gennis_teacher_group_statistics"
+
+    id                       = Column(BigInteger, primary_key=True, index=True)
+    gennis_id                = Column(Integer, nullable=False, unique=True)
+    teacher_gennis_id        = Column(Integer, nullable=True)
+    reason_gennis_id         = Column(Integer, nullable=True)
+    percentage               = Column(Integer, nullable=True)
+    calendar_month_gennis_id = Column(Integer, nullable=True)
+    calendar_year_gennis_id  = Column(Integer, nullable=True)
+    number_students          = Column(Integer, nullable=True)
+    synced_at                = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
+class GennisTeacherObservationDaySync(Base):
+    __tablename__ = "gennis_teacher_observation_day"
+
+    id                       = Column(BigInteger, primary_key=True, index=True)
+    gennis_id                = Column(Integer, nullable=False, unique=True)
+    teacher_gennis_id        = Column(Integer, nullable=True)
+    group_gennis_id          = Column(Integer, nullable=True)
+    calendar_day_gennis_id   = Column(Integer, nullable=True)
+    calendar_month_gennis_id = Column(Integer, nullable=True)
+    calendar_year_gennis_id  = Column(Integer, nullable=True)
+    user_gennis_id           = Column(Integer, nullable=True)
+    average                  = Column(Integer, nullable=True)
+    synced_at                = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
+class GennisLessonPlanSync(Base):
+    __tablename__ = "gennis_lesson_plan"
+
+    id                = Column(BigInteger, primary_key=True, index=True)
+    gennis_id         = Column(Integer, nullable=False, unique=True)
+    teacher_gennis_id = Column(Integer, nullable=True)
+    group_gennis_id   = Column(Integer, nullable=True)
+    ball              = Column(Integer, nullable=True)
+    date              = Column(DateTime, nullable=True)
+    synced_at         = Column(DateTime, server_default=func.now(), onupdate=func.now())
