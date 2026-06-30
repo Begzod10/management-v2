@@ -977,3 +977,32 @@ class GennisLessonPlanSync(Base):
     ball              = Column(Integer, nullable=True)
     date              = Column(DateTime, nullable=True)
     synced_at         = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
+# ── Rooms (local, managed by gennis-v2) ──────────────────────────────────────
+
+class Room(Base):
+    __tablename__ = "room"
+
+    id               = Column(BigInteger, primary_key=True, index=True)
+    name             = Column(String(255), nullable=False)
+    location_id      = Column(Integer, nullable=True)
+    electronic_board = Column(Boolean, default=False)
+    seats_number     = Column(Integer, nullable=True)
+    deleted          = Column(Boolean, default=False)
+    created_at       = Column(DateTime, server_default=func.now())
+
+    images = relationship("RoomImage", back_populates="room", lazy="selectin",
+                          primaryjoin="and_(Room.id == RoomImage.room_id, RoomImage.deleted == False)")
+
+
+class RoomImage(Base):
+    __tablename__ = "room_image"
+
+    id         = Column(BigInteger, primary_key=True, index=True)
+    room_id    = Column(BigInteger, ForeignKey("room.id"), nullable=False)
+    photo_url  = Column(String(500), nullable=False)
+    deleted    = Column(Boolean, default=False)
+    created_at = Column(DateTime, server_default=func.now())
+
+    room = relationship("Room", back_populates="images", lazy="selectin")
