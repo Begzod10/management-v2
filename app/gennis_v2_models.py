@@ -5,7 +5,7 @@ management-v2 PostgreSQL database (DATABASE_URL_V2).
 Migrations for these tables live in alembic_v2/.
 Run:  alembic -c alembic_v2.ini upgrade head
 """
-from sqlalchemy import BigInteger, Boolean, Column, Date, DateTime, Index, Integer, String, UniqueConstraint
+from sqlalchemy import BigInteger, Boolean, Column, Date, DateTime, Index, Integer, JSON, String, Text, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.sql import func
 
@@ -90,6 +90,39 @@ class GennisGroupTime(BaseV2):
     room        = Column(String(100), nullable=True)
     location_id = Column(Integer, nullable=True)
     created_at  = Column(DateTime, server_default=func.now())
+
+
+class GennisStudentRegistration(BaseV2):
+    """Self-service student registration submitted from the gennis-v2 app.
+
+    Kept separate from gennis_student (a read-only sync mirror of the old
+    gennis DB) because it carries fields — address, birth_day, password,
+    shift, comment — that don't exist there.
+    """
+    __tablename__ = "gennis_student_registration"
+    __table_args__ = (
+        UniqueConstraint("username", name="uq_gsr_username"),
+        Index("ix_gsr_location", "location_id"),
+        Index("ix_gsr_phone", "phone"),
+    )
+
+    id              = Column(BigInteger, primary_key=True, autoincrement=True)
+    name            = Column(String(255), nullable=False)
+    surname         = Column(String(255), nullable=False)
+    father_name     = Column(String(255), nullable=True)
+    phone           = Column(String(50), nullable=False)
+    parent_phone    = Column(String(50), nullable=True)
+    address         = Column(String(500), nullable=True)
+    birth_day       = Column(Date, nullable=True)
+    comment         = Column(Text, nullable=True)
+    username        = Column(String(100), nullable=False)
+    password_hash   = Column(String(255), nullable=False)
+    language_id     = Column(Integer, nullable=True)
+    location_id     = Column(Integer, nullable=True)
+    shift_id        = Column(Integer, nullable=True)
+    shift_name      = Column(String(100), nullable=True)
+    subjects        = Column(JSON, nullable=True)   # [{"id": 1, "name": "Mental arifmetika"}, ...]
+    created_at      = Column(DateTime, server_default=func.now())
 
 
 class GennisAttendance(BaseV2):
