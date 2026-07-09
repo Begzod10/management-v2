@@ -125,6 +125,91 @@ class GennisStudentRegistration(BaseV2):
     created_at      = Column(DateTime, server_default=func.now())
 
 
+class GennisTeacherRegistration(BaseV2):
+    """Self-service teacher registration submitted from the gennis-v2 app.
+
+    Kept separate from gennis_teacher (a read-only sync mirror of the old
+    gennis DB) because it carries fields — address, birth_day, password,
+    comment — that don't exist there.
+    """
+    __tablename__ = "gennis_teacher_registration"
+    __table_args__ = (
+        UniqueConstraint("username", name="uq_gtr_username"),
+        Index("ix_gtr_location", "location_id"),
+        Index("ix_gtr_phone", "phone"),
+    )
+
+    id            = Column(BigInteger, primary_key=True, autoincrement=True)
+    name          = Column(String(255), nullable=False)
+    surname       = Column(String(255), nullable=False)
+    father_name   = Column(String(255), nullable=True)
+    phone         = Column(String(50), nullable=False)
+    address       = Column(String(500), nullable=True)
+    birth_day     = Column(Date, nullable=True)
+    comment       = Column(Text, nullable=True)
+    username      = Column(String(100), nullable=False)
+    password_hash = Column(String(255), nullable=False)
+    language_id   = Column(Integer, nullable=True)
+    location_id   = Column(Integer, nullable=True)
+    subjects      = Column(JSON, nullable=True)   # [{"id": 1, "name": "Mental arifmetika"}, ...]
+    created_at    = Column(DateTime, server_default=func.now())
+
+
+class GennisAssistantRegistration(BaseV2):
+    """Self-service assistant registration submitted from the gennis-v2 app.
+
+    Kept separate from gennis_assistent (a read-only sync mirror of the old
+    gennis DB) because it carries fields — address, birth_day, password,
+    comment — that don't exist there.
+    """
+    __tablename__ = "gennis_assistant_registration"
+    __table_args__ = (
+        UniqueConstraint("username", name="uq_gar_username"),
+        Index("ix_gar_location", "location_id"),
+        Index("ix_gar_phone", "phone"),
+    )
+
+    id            = Column(BigInteger, primary_key=True, autoincrement=True)
+    name          = Column(String(255), nullable=False)
+    surname       = Column(String(255), nullable=False)
+    father_name   = Column(String(255), nullable=True)
+    phone         = Column(String(50), nullable=False)
+    address       = Column(String(500), nullable=True)
+    birth_day     = Column(Date, nullable=True)
+    comment       = Column(Text, nullable=True)
+    username      = Column(String(100), nullable=False)
+    password_hash = Column(String(255), nullable=False)
+    language_id   = Column(Integer, nullable=True)
+    location_id   = Column(Integer, nullable=True)
+    teacher_id    = Column(Integer, nullable=True)   # gennis_teacher.gennis_id they'll assist
+    created_at    = Column(DateTime, server_default=func.now())
+
+
+class GennisParentRegistration(BaseV2):
+    """Self-service parent registration submitted from the gennis-v2 app.
+
+    Optionally links to an existing student (their child) by id; left NULL
+    if the child isn't in the system yet — staff can link it later.
+    """
+    __tablename__ = "gennis_parent_registration"
+    __table_args__ = (
+        UniqueConstraint("username", name="uq_gpr_username"),
+        Index("ix_gpr_phone", "phone"),
+        Index("ix_gpr_student", "student_id"),
+    )
+
+    id            = Column(BigInteger, primary_key=True, autoincrement=True)
+    name          = Column(String(255), nullable=False)
+    surname       = Column(String(255), nullable=False)
+    phone         = Column(String(50), nullable=False)
+    address       = Column(String(500), nullable=True)
+    comment       = Column(Text, nullable=True)
+    username      = Column(String(100), nullable=False)
+    password_hash = Column(String(255), nullable=False)
+    student_id    = Column(Integer, nullable=True)   # gennis_student.id (their child), if known
+    created_at    = Column(DateTime, server_default=func.now())
+
+
 class GennisAttendance(BaseV2):
     """Actual per-lesson attendance — one row per student per lesson date per group."""
     __tablename__ = "gennis_attendance"
