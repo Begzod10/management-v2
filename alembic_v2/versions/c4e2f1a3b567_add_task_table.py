@@ -17,23 +17,34 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.execute("CREATE TYPE task_status AS ENUM ('todo', 'in_progress', 'done', 'cancelled')")
-    op.execute("CREATE TYPE task_priority AS ENUM ('low', 'medium', 'high')")
+    op.execute("""
+        DO $$ BEGIN
+            CREATE TYPE task_status AS ENUM ('todo', 'in_progress', 'done', 'cancelled');
+        EXCEPTION WHEN duplicate_object THEN NULL;
+        END $$;
+    """)
+    op.execute("""
+        DO $$ BEGIN
+            CREATE TYPE task_priority AS ENUM ('low', 'medium', 'high');
+        EXCEPTION WHEN duplicate_object THEN NULL;
+        END $$;
+    """)
 
-    op.create_table(
-        "task",
-        sa.Column("id", sa.BigInteger(), primary_key=True, index=True),
-        sa.Column("title", sa.String(255), nullable=False),
-        sa.Column("description", sa.Text(), nullable=True),
-        sa.Column("status", sa.Enum("todo", "in_progress", "done", "cancelled", name="task_status", create_type=False), nullable=False, server_default="todo"),
-        sa.Column("priority", sa.Enum("low", "medium", "high", name="task_priority", create_type=False), nullable=False, server_default="medium"),
-        sa.Column("due_date", sa.DateTime(), nullable=True),
-        sa.Column("created_by", sa.BigInteger(), sa.ForeignKey("user.id"), nullable=False),
-        sa.Column("assigned_to", sa.BigInteger(), sa.ForeignKey("user.id"), nullable=True),
-        sa.Column("deleted", sa.Boolean(), nullable=False, server_default="false"),
-        sa.Column("created_at", sa.DateTime(), server_default=sa.text("now()")),
-        sa.Column("updated_at", sa.DateTime(), nullable=True),
-    )
+    op.execute("""
+        CREATE TABLE IF NOT EXISTS task (
+            id BIGSERIAL PRIMARY KEY,
+            title VARCHAR(255) NOT NULL,
+            description TEXT,
+            status task_status NOT NULL DEFAULT 'todo',
+            priority task_priority NOT NULL DEFAULT 'medium',
+            due_date TIMESTAMP,
+            created_by BIGINT NOT NULL REFERENCES "user"(id),
+            assigned_to BIGINT REFERENCES "user"(id),
+            deleted BOOLEAN NOT NULL DEFAULT false,
+            created_at TIMESTAMP DEFAULT now(),
+            updated_at TIMESTAMP
+        )
+    """)
 
 
 def downgrade() -> None:
