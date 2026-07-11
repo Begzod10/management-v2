@@ -12,6 +12,7 @@ from typing import Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy import text
 
 revision: str = 'b1c2d3e4f5a6'
 down_revision: Union[str, Sequence[str], None] = '59cfa0718ffa'
@@ -281,6 +282,11 @@ def upgrade() -> None:
     )
 
     # ── Statistics tables ──────────────────────────────────────────────────────
+    # Drop old gennis_attendance if it exists with the legacy came/lesson_date schema
+    op.execute(text("DROP INDEX IF EXISTS ix_ga_group_date"))
+    op.execute(text("DROP INDEX IF EXISTS ix_ga_student"))
+    op.execute(text("DROP INDEX IF EXISTS ix_ga_location"))
+    op.execute(text("DROP TABLE IF EXISTS gennis_attendance CASCADE"))
     op.create_table(
         'gennis_attendance',
         sa.Column('id', sa.BigInteger(), autoincrement=True, nullable=False),
