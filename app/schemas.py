@@ -66,6 +66,7 @@ class UserUpdate(BaseModel):
     job_id: Optional[int] = None
     salary: Optional[int] = None
     role: Optional[str] = None
+    crm_username: Optional[str] = None
 
 
 class UserOut(BaseModel):
@@ -79,6 +80,7 @@ class UserOut(BaseModel):
     salary: Optional[int]
     role: str
     is_active: bool
+    crm_username: Optional[str] = None
 
     model_config = {"from_attributes": True}
 

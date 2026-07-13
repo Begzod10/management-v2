@@ -42,6 +42,7 @@ class User(Base):
     telegram_id = Column(BigInteger, unique=True, nullable=True, index=True)
     username = Column(String(100), unique=True, nullable=True, index=True)
     salary = Column(BigInteger, nullable=True, default=0)
+    crm_username = Column(String(100), nullable=True)
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, nullable=True)
 
