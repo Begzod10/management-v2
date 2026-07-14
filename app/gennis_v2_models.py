@@ -210,14 +210,22 @@ class GennisParentRegistration(BaseV2):
     created_at    = Column(DateTime, server_default=func.now())
 
 
-class GennisAttendance(BaseV2):
-    """Actual per-lesson attendance — one row per student per lesson date per group."""
-    __tablename__ = "gennis_attendance"
+class GennisLessonAttendance(BaseV2):
+    """Actual per-lesson attendance — one row per student per lesson date per group.
+
+    Named gennis_lesson_attendance (not gennis_attendance) because that name is
+    already taken by the wave2-synced teacher ball_percentage statistics table
+    (see sync_wave2_tables.py / MgmtGennisAttendanceStat) — two unrelated
+    features independently picked the same table name in parallel alembic_v2
+    branches, and only the stats table's migration ever actually ran in
+    production, so this table never existed until this migration.
+    """
+    __tablename__ = "gennis_lesson_attendance"
     __table_args__ = (
-        UniqueConstraint("group_id", "student_id", "lesson_date", name="uq_gennis_attendance"),
-        Index("ix_ga_group_date", "group_id", "lesson_date"),
-        Index("ix_ga_student", "student_id"),
-        Index("ix_ga_location", "location_id"),
+        UniqueConstraint("group_id", "student_id", "lesson_date", name="uq_gennis_lesson_attendance"),
+        Index("ix_gla_group_date", "group_id", "lesson_date"),
+        Index("ix_gla_student", "student_id"),
+        Index("ix_gla_location", "location_id"),
     )
 
     id          = Column(BigInteger, primary_key=True, autoincrement=True)
