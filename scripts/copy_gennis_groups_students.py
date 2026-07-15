@@ -5,15 +5,36 @@ Run per location:
     python scripts/copy_gennis_groups_students.py --location-id 3   # Chirchiq
     python scripts/copy_gennis_groups_students.py --location-id 2   # Gazalkent
     python scripts/copy_gennis_groups_students.py --all
+    python scripts/copy_gennis_groups_students.py --all --full      # TRUNCATE + full reload
 
 Creates tables on first run (IF NOT EXISTS). Safe to re-run — upserts by gennis_id.
+
+Reads GENNIS_DB_URL (source) and DATABASE_URL (destination) from the
+environment — same convention as sync_wave2_tables.py. No credentials
+belong in this file; point GENNIS_DB_URL at a staging DB (e.g. one
+restored from a fresh dump) to import from something other than the
+live remote gennis DB.
 """
 import argparse
+import os
+import sys
+
 import psycopg2
 from psycopg2.extras import execute_values
 
-GENNIS_DSN = "host=5.129.242.151 dbname=gennis user=postgres password=or9T#u-x5PZo--"
-MGMT_DSN   = "host=localhost dbname=gennis_management user=postgres password=22100122"
+
+def _psycopg2_dsn(url: str) -> str:
+    """psycopg2 doesn't understand the +asyncpg driver suffix SQLAlchemy uses."""
+    return url.replace("postgresql+asyncpg://", "postgresql://")
+
+
+if not os.environ.get("GENNIS_DB_URL") or not os.environ.get("DATABASE_URL"):
+    sys.exit(
+        "GENNIS_DB_URL and DATABASE_URL must be set in the environment."
+    )
+
+GENNIS_DSN = _psycopg2_dsn(os.environ["GENNIS_DB_URL"])
+MGMT_DSN   = _psycopg2_dsn(os.environ["DATABASE_URL"])
 
 
 # ── DDL ───────────────────────────────────────────────────────────────────────
@@ -393,14 +414,34 @@ def sync_student_subjects(gennis_cur, mgmt_cur):
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 
+FULL_REPLACE_TABLES = [
+    # Order matters: link/junction tables first (they don't have their own FKs
+    # enforced here, but truncating parents after children avoids orphaned rows
+    # lingering mid-run), then the entity tables.
+    "gennis_student_group",
+    "gennis_deleted_student_group",
+    "gennis_teacher_subject",
+    "gennis_student_subject",
+    "gennis_lead",
+    "gennis_student",
+    "gennis_group",
+    "gennis_subject",
+]
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--location-id", type=int, help="Sync a single location by ID")
     parser.add_argument("--all", action="store_true", help="Sync all locations")
+    parser.add_argument("--full", action="store_true",
+                         help="TRUNCATE all target tables first (full replace, not incremental)")
     args = parser.parse_args()
 
     if not args.all and not args.location_id:
         parser.error("Specify --location-id N or --all")
+
+    if args.full and not args.all:
+        parser.error("--full requires --all (can't partially wipe a location-scoped table set)")
 
     location_ids = None if args.all else [args.location_id]
 
@@ -409,6 +450,13 @@ def main():
 
     print("Creating tables if needed…")
     ensure_schema(mgmt)
+
+    if args.full:
+        print("--full: truncating target tables…")
+        with mgmt.cursor() as mc:
+            for table in FULL_REPLACE_TABLES:
+                mc.execute(f"TRUNCATE TABLE {table} CASCADE")
+        mgmt.commit()
 
     loc_label = f"location_id={location_ids}" if location_ids else "ALL locations"
     print(f"Syncing {loc_label}…")
