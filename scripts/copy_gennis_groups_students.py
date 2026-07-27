@@ -60,9 +60,19 @@ CREATE TABLE IF NOT EXISTS gennis_group (
     status               BOOLEAN DEFAULT true,
     deleted              BOOLEAN DEFAULT false,
     price                INTEGER,
+    teacher_salary       INTEGER,
+    assistent_salary     INTEGER,
+    attendance_days      INTEGER,
     created_at           TIMESTAMP DEFAULT NOW(),
     updated_at           TIMESTAMP DEFAULT NOW()
 );
+
+-- CREATE TABLE IF NOT EXISTS doesn't add columns to an already-existing
+-- table, so self-heal any deployment that created gennis_group before
+-- these three columns existed on the model.
+ALTER TABLE gennis_group ADD COLUMN IF NOT EXISTS teacher_salary INTEGER;
+ALTER TABLE gennis_group ADD COLUMN IF NOT EXISTS assistent_salary INTEGER;
+ALTER TABLE gennis_group ADD COLUMN IF NOT EXISTS attendance_days INTEGER;
 
 CREATE TABLE IF NOT EXISTS gennis_student (
     id           BIGSERIAL PRIMARY KEY,
@@ -197,7 +207,8 @@ def sync_groups(gennis_cur, mgmt_cur, location_ids):
                g.subject_id,
                t.user_id AS teacher_user_id,
                a.user_id AS assistent_user_id,
-               g.status, g.deleted, g.price
+               g.status, g.deleted, g.price,
+               g.teacher_salary, g.assistent_salary, g.attendance_days
         FROM groups g
         LEFT JOIN locations l  ON l.id = g.location_id
         LEFT JOIN teachers t   ON t.id = g.teacher_id
@@ -207,7 +218,8 @@ def sync_groups(gennis_cur, mgmt_cur, location_ids):
 
     upserted = 0
     for (gennis_id, name, loc_id, loc_name, subject_gennis_id,
-         teacher_uid, assistent_uid, status, deleted, price) in gennis_cur.fetchall():
+         teacher_uid, assistent_uid, status, deleted, price,
+         teacher_salary, assistent_salary, attendance_days) in gennis_cur.fetchall():
 
         subject_local_id = None
         if subject_gennis_id:
@@ -223,17 +235,23 @@ def sync_groups(gennis_cur, mgmt_cur, location_ids):
                 gennis_id, name, location_id, location_name,
                 subject_id, teacher_gennis_id, teacher_mgmt_id,
                 assistent_gennis_id, assistent_mgmt_id,
-                status, deleted, price, updated_at
-            ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW())
+                status, deleted, price,
+                teacher_salary, assistent_salary, attendance_days,
+                updated_at
+            ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW())
             ON CONFLICT (gennis_id) DO UPDATE SET
                 name=EXCLUDED.name, status=EXCLUDED.status,
                 deleted=EXCLUDED.deleted, price=EXCLUDED.price,
                 teacher_mgmt_id=EXCLUDED.teacher_mgmt_id,
                 assistent_mgmt_id=EXCLUDED.assistent_mgmt_id,
+                teacher_salary=EXCLUDED.teacher_salary,
+                assistent_salary=EXCLUDED.assistent_salary,
+                attendance_days=EXCLUDED.attendance_days,
                 updated_at=NOW()
         """, (gennis_id, name, loc_id, loc_name, subject_local_id,
               teacher_uid, teacher_mgmt_id, assistent_uid, assistent_mgmt_id,
-              status, deleted, price))
+              status, deleted, price,
+              teacher_salary, assistent_salary, attendance_days))
         upserted += 1
 
     print(f"  Groups:           {upserted} upserted")
