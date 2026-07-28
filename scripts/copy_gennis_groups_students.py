@@ -242,6 +242,9 @@ def sync_groups(gennis_cur, mgmt_cur, location_ids):
             ON CONFLICT (gennis_id) DO UPDATE SET
                 name=EXCLUDED.name, status=EXCLUDED.status,
                 deleted=EXCLUDED.deleted, price=EXCLUDED.price,
+                teacher_salary=EXCLUDED.teacher_salary,
+                assistent_salary=EXCLUDED.assistent_salary,
+                attendance_days=EXCLUDED.attendance_days,
                 teacher_mgmt_id=EXCLUDED.teacher_mgmt_id,
                 assistent_mgmt_id=EXCLUDED.assistent_mgmt_id,
                 teacher_salary=EXCLUDED.teacher_salary,

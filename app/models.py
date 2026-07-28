@@ -613,6 +613,9 @@ class GennisGroup(Base):
     status              = Column(Boolean, default=True)
     deleted             = Column(Boolean, default=False)
     price               = Column(Integer, nullable=True)
+    teacher_salary      = Column(Integer, nullable=True)
+    assistent_salary    = Column(Integer, nullable=True)
+    attendance_days     = Column(Integer, nullable=True)
     created_at          = Column(DateTime, server_default=func.now())
     updated_at          = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
