@@ -15,12 +15,16 @@ Run:
   python scripts/sync_gennis_accounting.py --all       # since 2026-01-01
 """
 import argparse
+import os
 import psycopg2
 from psycopg2.extras import execute_values
 from datetime import date, timedelta
+from dotenv import load_dotenv
 
-GENNIS_DSN = "host=5.129.242.151 dbname=gennis user=postgres password=or9T#u-x5PZo--"
-MGMT_DSN   = "host=localhost dbname=management-v2 user=postgres password=123"
+load_dotenv()
+
+GENNIS_DSN = os.environ["GENNIS_SYNC_DSN"]   # e.g. host=... dbname=gennis user=postgres password=...
+MGMT_DSN   = os.environ["MGMT_SYNC_DSN"]     # e.g. host=localhost dbname=management-v2 user=postgres password=...
 
 DEFAULT_SINCE = date(2026, 1, 1)
 
