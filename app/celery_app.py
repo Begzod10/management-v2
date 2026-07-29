@@ -16,5 +16,9 @@ celery.conf.beat_schedule = {
         "task": "app.tasks.generate_monthly_salaries",
         "schedule": crontab(day_of_month=1, hour=0, minute=0),
     },
+    "sync-salary-totals-nightly": {
+        "task": "app.tasks.sync_salary_totals",
+        "schedule": crontab(hour=2, minute=30),
+    },
 }
 celery.conf.timezone = "Asia/Tashkent"

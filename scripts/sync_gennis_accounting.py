@@ -8,6 +8,8 @@ Tables synced:
   gennis_staff_salary_payment    ← staffsalaries
   gennis_overhead                ← overhead
   gennis_capital_expenditure     ← capital_expenditure
+  gennis_teacher_salary.total_salary   ← teachersalary   (drift fix, last 2 months)
+  gennis_assistent_salary.total_salary ← asistent_salary (drift fix, last 2 months)
 
 Run:
   python scripts/sync_gennis_accounting.py             # since last synced date
@@ -353,6 +355,73 @@ def sync_capital(gc, mc, since):
     print(f"  Capital expenditure:  {inserted} inserted (since {since})")
 
 
+# ── salary total drift fix ────────────────────────────────────────────────────
+
+def sync_total_salary(gc, mc):
+    """Sync total_salary from old gennis monthly salary tables → management DB.
+
+    Old gennis recomputes total_salary nightly from AttendanceDays; the management
+    DB copy drifts if old gennis updates it after the last sync.  This function
+    covers the current month and the previous month so mid-month changes stay
+    current regardless of when the sync runs.
+
+    old gennis:  teachersalary.teacher_id     → mgmt: gennis_teacher_salary.teacher_id
+    old gennis:  asistent_salary.assisten_id  → mgmt: gennis_assistent_salary.assistent_id
+    """
+    gc.execute("""
+        SELECT
+            ts.teacher_id,
+            ts.location_id,
+            EXTRACT(MONTH FROM cm.date)::int AS calendar_month,
+            EXTRACT(YEAR  FROM cy.date)::int AS calendar_year,
+            COALESCE(ts.total_salary, 0)     AS total_salary
+        FROM teachersalary ts
+        JOIN calendarmonth cm ON cm.id = ts.calendar_month
+        JOIN calendaryear  cy ON cy.id = ts.calendar_year
+        WHERE cm.date >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '1 month'
+    """)
+    teacher_rows = gc.fetchall()
+    if teacher_rows:
+        execute_values(mc, """
+            UPDATE gennis_teacher_salary AS t
+            SET total_salary = d.total_salary,
+                synced_at    = NOW()
+            FROM (VALUES %s) AS d(teacher_id, location_id, calendar_month, calendar_year, total_salary)
+            WHERE t.teacher_id     = d.teacher_id
+              AND t.location_id    = d.location_id
+              AND t.calendar_month = d.calendar_month
+              AND t.calendar_year  = d.calendar_year
+        """, teacher_rows)
+    print(f"  Teacher total_salary: {len(teacher_rows)} rows synced")
+
+    gc.execute("""
+        SELECT
+            a.assisten_id,
+            a.location_id,
+            EXTRACT(MONTH FROM cm.date)::int AS calendar_month,
+            EXTRACT(YEAR  FROM cy.date)::int AS calendar_year,
+            COALESCE(a.total_salary, 0)      AS total_salary
+        FROM asistent_salary a
+        JOIN calendarmonth cm ON cm.id = a.calendar_month
+        JOIN calendaryear  cy ON cy.id = a.calendar_year
+        WHERE cm.date >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '1 month'
+    """)
+    assistent_rows = gc.fetchall()
+    if assistent_rows:
+        execute_values(mc, """
+            UPDATE gennis_assistent_salary AS t
+            SET total_salary = d.total_salary,
+                synced_at    = NOW()
+            FROM (VALUES %s) AS d(assistent_id, location_id, calendar_month, calendar_year, total_salary)
+            WHERE t.assistent_id   = d.assistent_id
+              AND t.location_id    = d.location_id
+              AND t.calendar_month = d.calendar_month
+              AND t.calendar_year  = d.calendar_year
+        """, assistent_rows)
+    print(f"  Assistent total_salary: {len(assistent_rows)} rows synced")
+
+
+
 # ── main ──────────────────────────────────────────────────────────────────────
 
 def main():
@@ -400,6 +469,7 @@ def main():
             sync_staff_salary(gc, mc, ss_since)
             sync_overhead(gc, mc, oh_since)
             sync_capital(gc, mc, cap_since)
+            sync_total_salary(gc, mc)
 
             mgmt.commit()
             print("\nDone.")

@@ -1,6 +1,9 @@
 import logging
+import os
 from datetime import date
 import httpx
+import psycopg2
+from psycopg2.extras import execute_values
 from .celery_app import celery
 from .database import SessionLocal
 from .models import User, SalaryMonth
@@ -43,6 +46,94 @@ def generate_monthly_salaries():
         return {"created": created, "period": str(period)}
     finally:
         db.close()
+
+
+@celery.task(name="app.tasks.sync_salary_totals")
+def sync_salary_totals():
+    """Sync total_salary from old gennis into the management DB.
+
+    Old gennis recomputes total_salary nightly from AttendanceDays; without this
+    task the management DB copy drifts whenever old gennis updates the value after
+    our last sync run.  Covers current month + previous month.
+    """
+    gennis_dsn = os.environ.get("GENNIS_SYNC_DSN")
+    mgmt_dsn   = os.environ.get("MGMT_SYNC_DSN")
+    if not gennis_dsn or not mgmt_dsn:
+        logger.warning("sync_salary_totals: GENNIS_SYNC_DSN or MGMT_SYNC_DSN not set, skipping")
+        return {"skipped": True}
+
+    gennis = psycopg2.connect(gennis_dsn)
+    mgmt   = psycopg2.connect(mgmt_dsn)
+    gennis.autocommit = True
+    teacher_count = assistent_count = 0
+    try:
+        with gennis.cursor() as gc, mgmt.cursor() as mc:
+            gc.execute("""
+                SELECT
+                    ts.teacher_id,
+                    ts.location_id,
+                    EXTRACT(MONTH FROM cm.date)::int AS calendar_month,
+                    EXTRACT(YEAR  FROM cy.date)::int AS calendar_year,
+                    COALESCE(ts.total_salary, 0)
+                FROM teachersalary ts
+                JOIN calendarmonth cm ON cm.id = ts.calendar_month
+                JOIN calendaryear  cy ON cy.id = ts.calendar_year
+                WHERE cm.date >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '1 month'
+            """)
+            teacher_rows = gc.fetchall()
+            if teacher_rows:
+                execute_values(mc, """
+                    UPDATE gennis_teacher_salary AS t
+                    SET total_salary = d.total_salary,
+                        synced_at    = NOW()
+                    FROM (VALUES %s) AS d(teacher_id, location_id, calendar_month, calendar_year, total_salary)
+                    WHERE t.teacher_id     = d.teacher_id
+                      AND t.location_id    = d.location_id
+                      AND t.calendar_month = d.calendar_month
+                      AND t.calendar_year  = d.calendar_year
+                """, teacher_rows)
+                teacher_count = len(teacher_rows)
+
+            gc.execute("""
+                SELECT
+                    a.assisten_id,
+                    a.location_id,
+                    EXTRACT(MONTH FROM cm.date)::int AS calendar_month,
+                    EXTRACT(YEAR  FROM cy.date)::int AS calendar_year,
+                    COALESCE(a.total_salary, 0)
+                FROM asistent_salary a
+                JOIN calendarmonth cm ON cm.id = a.calendar_month
+                JOIN calendaryear  cy ON cy.id = a.calendar_year
+                WHERE cm.date >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '1 month'
+            """)
+            assistent_rows = gc.fetchall()
+            if assistent_rows:
+                execute_values(mc, """
+                    UPDATE gennis_assistent_salary AS t
+                    SET total_salary = d.total_salary,
+                        synced_at    = NOW()
+                    FROM (VALUES %s) AS d(assistent_id, location_id, calendar_month, calendar_year, total_salary)
+                    WHERE t.assistent_id   = d.assistent_id
+                      AND t.location_id    = d.location_id
+                      AND t.calendar_month = d.calendar_month
+                      AND t.calendar_year  = d.calendar_year
+                """, assistent_rows)
+                assistent_count = len(assistent_rows)
+
+            mgmt.commit()
+    except Exception as exc:
+        mgmt.rollback()
+        logger.error("sync_salary_totals failed: %s", exc)
+        raise
+    finally:
+        gennis.close()
+        mgmt.close()
+
+    logger.info(
+        "sync_salary_totals done: teachers=%d assistents=%d",
+        teacher_count, assistent_count,
+    )
+    return {"teacher_rows": teacher_count, "assistent_rows": assistent_count}
 
 
 @celery.task(name="app.tasks.send_telegram_notification", max_retries=2)
