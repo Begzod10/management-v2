@@ -196,7 +196,13 @@ def generate_lesson_plan_skeletons():
             return {"created": 0, "skipped": 0, "date": str(today)}
 
         rows = db.execute(
-            text("SELECT id, teacher_mgmt_id FROM gennis_group WHERE id = ANY(:ids) AND deleted = false"),
+            text("""
+                SELECT g.id,
+                       COALESCE(g.teacher_mgmt_id, ul.management_user_id) AS teacher_mgmt_id
+                FROM gennis_group g
+                LEFT JOIN gennis_user_link ul ON ul.gennis_user_id = g.teacher_gennis_id
+                WHERE g.id = ANY(:ids) AND g.deleted = false
+            """),
             {"ids": group_ids},
         ).fetchall()
         groups_by_id = {r.id: r for r in rows}
