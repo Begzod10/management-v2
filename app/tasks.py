@@ -4,9 +4,10 @@ from datetime import date
 import httpx
 import psycopg2
 from psycopg2.extras import execute_values
+from sqlalchemy import text
 from .celery_app import celery
 from .database import SessionLocal
-from .models import User, SalaryMonth, GennisGroup
+from .models import User, SalaryMonth
 from .gennis_v2_models import GennisGroupTime, LessonPlan
 from .config import settings
 
@@ -194,12 +195,11 @@ def generate_lesson_plan_skeletons():
             logger.info("lesson_plan skeletons: no groups scheduled for weekday=%s", weekday)
             return {"created": 0, "skipped": 0, "date": str(today)}
 
-        groups_by_id = {
-            g.id: g
-            for g in db.query(GennisGroup)
-            .filter(GennisGroup.id.in_(group_ids), GennisGroup.deleted == False)
-            .all()
-        }
+        rows = db.execute(
+            text("SELECT id, teacher_mgmt_id FROM gennis_group WHERE id = ANY(:ids) AND deleted = false"),
+            {"ids": group_ids},
+        ).fetchall()
+        groups_by_id = {r.id: r for r in rows}
 
         existing = {
             row[0]
@@ -220,12 +220,12 @@ def generate_lesson_plan_skeletons():
                 skipped += 1
                 continue
             group = groups_by_id.get(gid)
-            if not group or not group.teacher_mgmt_id:
+            if not group or not group[1]:
                 skipped += 1
                 continue
             db.add(LessonPlan(
                 group_id=gid,
-                teacher_id=group.teacher_mgmt_id,
+                teacher_id=group[1],
                 year=year,
                 month=month,
                 day=day,
