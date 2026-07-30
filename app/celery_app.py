@@ -20,5 +20,9 @@ celery.conf.beat_schedule = {
         "task": "app.tasks.sync_salary_totals",
         "schedule": crontab(hour=2, minute=30),
     },
+    "generate-lesson-plan-skeletons-daily": {
+        "task": "app.tasks.generate_lesson_plan_skeletons",
+        "schedule": crontab(hour=6, minute=0),
+    },
 }
 celery.conf.timezone = "Asia/Tashkent"

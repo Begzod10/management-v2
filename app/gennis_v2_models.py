@@ -237,3 +237,26 @@ class GennisLessonAttendance(BaseV2):
     teacher_id  = Column(BigInteger, nullable=True)
     location_id = Column(Integer, nullable=True)
     created_at  = Column(DateTime, server_default=func.now())
+
+
+class LessonPlan(BaseV2):
+    """Skeleton lesson plan created daily by Celery for each group with a lesson today.
+
+    Maps to the `lesson_plan` table owned by gennis-v2 (created via gennis-v2's
+    startup create_all). This side only inserts blank skeletons; teachers fill in
+    the content through the gennis-v2 UI.
+    """
+    __tablename__ = "lesson_plan"
+    __table_args__ = (
+        UniqueConstraint("group_id", "year", "month", "day", name="uq_lesson_plan_group_date"),
+    )
+
+    id         = Column(BigInteger, primary_key=True, autoincrement=True)
+    group_id   = Column(BigInteger, nullable=False)
+    teacher_id = Column(BigInteger, nullable=False)
+    year       = Column(String(4), nullable=False)
+    month      = Column(String(2), nullable=False)
+    day        = Column(String(2), nullable=False)
+    date       = Column(Date, nullable=True)
+    deleted    = Column(Boolean, nullable=False, default=False)
+    created_at = Column(DateTime, server_default=func.now())

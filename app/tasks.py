@@ -6,7 +6,8 @@ import psycopg2
 from psycopg2.extras import execute_values
 from .celery_app import celery
 from .database import SessionLocal
-from .models import User, SalaryMonth
+from .models import User, SalaryMonth, GennisGroup
+from .gennis_v2_models import GennisGroupTime, LessonPlan
 from .config import settings
 
 logger = logging.getLogger(__name__)
@@ -160,3 +161,85 @@ def send_telegram_notification(chat_id: int, text: str):
             logger.info("telegram sent chat_id=%s len=%s", chat_id, len(text))
     except Exception as exc:
         logger.warning("telegram transport error chat_id=%s err=%s", chat_id, exc)
+
+
+@celery.task(name="app.tasks.generate_lesson_plan_skeletons")
+def generate_lesson_plan_skeletons():
+    """Create a blank lesson_plan skeleton for every group that has a lesson today.
+
+    Runs daily at 06:00 Tashkent time. Teachers then open the lesson-plan page
+    and fill in the content — the skeleton just ensures the row exists so the
+    page doesn't show "not found" on lesson days.
+
+    Skips groups that already have a plan for today (idempotent via the unique
+    constraint on group_id+year+month+day) and groups with no assigned teacher.
+    """
+    today = date.today()
+    weekday = today.weekday()   # 0=Mon … 6=Sun, matches day_of_week in gennis_group_time
+    year  = str(today.year)
+    month = str(today.month).zfill(2)
+    day   = str(today.day).zfill(2)
+
+    db = SessionLocal()
+    try:
+        group_ids = [
+            row[0]
+            for row in db.query(GennisGroupTime.group_id)
+            .filter(GennisGroupTime.day_of_week == weekday)
+            .distinct()
+            .all()
+        ]
+
+        if not group_ids:
+            logger.info("lesson_plan skeletons: no groups scheduled for weekday=%s", weekday)
+            return {"created": 0, "skipped": 0, "date": str(today)}
+
+        groups_by_id = {
+            g.id: g
+            for g in db.query(GennisGroup)
+            .filter(GennisGroup.id.in_(group_ids), GennisGroup.deleted == False)
+            .all()
+        }
+
+        existing = {
+            row[0]
+            for row in db.query(LessonPlan.group_id)
+            .filter(
+                LessonPlan.group_id.in_(group_ids),
+                LessonPlan.year == year,
+                LessonPlan.month == month,
+                LessonPlan.day == day,
+                LessonPlan.deleted == False,
+            )
+            .all()
+        }
+
+        created = skipped = 0
+        for gid in group_ids:
+            if gid in existing:
+                skipped += 1
+                continue
+            group = groups_by_id.get(gid)
+            if not group or not group.teacher_mgmt_id:
+                skipped += 1
+                continue
+            db.add(LessonPlan(
+                group_id=gid,
+                teacher_id=group.teacher_mgmt_id,
+                year=year,
+                month=month,
+                day=day,
+                date=today,
+                deleted=False,
+            ))
+            created += 1
+
+        db.commit()
+        logger.info("lesson_plan skeletons: created=%s skipped=%s date=%s", created, skipped, today)
+        return {"created": created, "skipped": skipped, "date": str(today)}
+    except Exception:
+        db.rollback()
+        logger.exception("lesson_plan skeleton generation failed")
+        raise
+    finally:
+        db.close()
