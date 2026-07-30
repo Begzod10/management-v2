@@ -198,9 +198,13 @@ def generate_lesson_plan_skeletons():
         rows = db.execute(
             text("""
                 SELECT g.id,
-                       COALESCE(g.teacher_mgmt_id, ul.management_user_id) AS teacher_mgmt_id
+                       COALESCE(
+                           g.teacher_mgmt_id,
+                           ul.management_user_id
+                       ) AS teacher_mgmt_id
                 FROM gennis_group g
-                LEFT JOIN gennis_user_link ul ON ul.gennis_user_id = g.teacher_gennis_id
+                LEFT JOIN gennis_teacher gt ON gt.gennis_id = g.teacher_gennis_id
+                LEFT JOIN gennis_user_link ul ON ul.gennis_user_id = gt.user_gennis_id
                 WHERE g.id = ANY(:ids) AND g.deleted = false
             """),
             {"ids": group_ids},
