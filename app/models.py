@@ -1153,6 +1153,22 @@ turon_student_group_table = Table(
 )
 
 
+class TuronDeletedStudentGroup(Base):
+    __tablename__ = "turon_deleted_student_group"
+
+    id               = Column(BigInteger, primary_key=True, index=True)
+    turon_id         = Column(Integer, nullable=False, unique=True)
+    student_turon_id = Column(Integer, nullable=False, index=True)
+    group_turon_id   = Column(Integer, nullable=False, index=True)
+    reason_turon_id  = Column(Integer, nullable=True)
+    teacher_turon_id = Column(Integer, nullable=True)
+    comment          = Column(String(500), nullable=True)
+    deleted_date     = Column(Date, nullable=True)
+    synced_at        = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (UniqueConstraint("student_turon_id", "group_turon_id", name="uq_turon_deleted_student_group"),)
+
+
 class TuronLead(Base):
     __tablename__ = "turon_lead"
 

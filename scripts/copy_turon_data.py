@@ -32,6 +32,7 @@ MGMT_DSN  = _psycopg2_dsn(os.environ["DATABASE_URL_V2"])
 
 
 FULL_REPLACE_TABLES = [
+    "turon_deleted_student_group",
     "turon_student_group",
     "turon_lead",
     "turon_student_payment",
@@ -277,6 +278,53 @@ def sync_student_groups(turon_cur, mgmt_cur, branch_ids):
             ON CONFLICT DO NOTHING
         """, rows)
     print(f"  Student-group:    {len(rows)} upserted")
+
+
+def sync_deleted_students(turon_cur, mgmt_cur, branch_ids):
+    filter_sql = "AND g.branch_id = ANY(%s)" if branch_ids else ""
+    # First upsert the students themselves so foreign-key-like lookups work
+    turon_cur.execute(f"""
+        SELECT DISTINCT ds.student_id, s.user_id, u.name, u.surname,
+               s.debt_status, s.born_date, s.parents_number
+        FROM students_deletedstudent ds
+        JOIN group_group g ON g.id = ds.group_id
+        JOIN students_student s ON s.id = ds.student_id
+        JOIN user_customuser u ON u.id = s.user_id
+        WHERE g.system_id = 2 {filter_sql}
+    """, (branch_ids,) if branch_ids else ())
+    for r in turon_cur.fetchall():
+        mgmt_cur.execute("""
+            INSERT INTO turon_student (
+                turon_id, turon_user_id, name, surname,
+                debt_status, born_date, parents_number, synced_at
+            ) VALUES (%s,%s,%s,%s,%s,%s,%s,NOW())
+            ON CONFLICT (turon_id) DO UPDATE SET
+                name=EXCLUDED.name, surname=EXCLUDED.surname,
+                debt_status=EXCLUDED.debt_status, parents_number=EXCLUDED.parents_number,
+                synced_at=NOW()
+        """, (r[0], r[1], r[2], r[3], r[4], r[5], r[6]))
+
+    # Now upsert the deletion records
+    turon_cur.execute(f"""
+        SELECT ds.id, ds.student_id, ds.group_id,
+               ds.group_reason_id, ds.teacher_id, ds.comment, ds.deleted_date
+        FROM students_deletedstudent ds
+        JOIN group_group g ON g.id = ds.group_id
+        WHERE g.system_id = 2 {filter_sql}
+    """, (branch_ids,) if branch_ids else ())
+    rows = turon_cur.fetchall()
+    for r in rows:
+        mgmt_cur.execute("""
+            INSERT INTO turon_deleted_student_group (
+                turon_id, student_turon_id, group_turon_id,
+                reason_turon_id, teacher_turon_id, comment, deleted_date, synced_at
+            ) VALUES (%s,%s,%s,%s,%s,%s,%s,NOW())
+            ON CONFLICT (student_turon_id, group_turon_id) DO UPDATE SET
+                turon_id=EXCLUDED.turon_id,
+                comment=EXCLUDED.comment, deleted_date=EXCLUDED.deleted_date,
+                synced_at=NOW()
+        """, (r[0], r[1], r[2], r[3], r[4], r[5], r[6]))
+    print(f"  Deleted students: {len(rows)} upserted")
 
 
 def sync_leads(turon_cur, mgmt_cur, branch_ids):
@@ -618,6 +666,7 @@ def main():
         sync_groups(tc, mc, branch_ids)
         sync_students(tc, mc, branch_ids)
         sync_student_groups(tc, mc, branch_ids)
+        sync_deleted_students(tc, mc, branch_ids)
         sync_leads(tc, mc, branch_ids)
         mgmt.commit()
 
