@@ -1,5 +1,6 @@
 """
 Copy turon_platform data → management-v2 turon_* mirror tables.
+Only syncs system_id=2 (school). system_id=1 (center) is covered by gennis-v2.
 
 Run per branch:
     python scripts/copy_turon_data.py --branch-id 1
@@ -180,7 +181,7 @@ def sync_groups(turon_cur, mgmt_cur, branch_ids):
                g.language_id, g.price, g.teacher_salary,
                g.attendance_days, g.status, g.deleted, g.created_date
         FROM group_group g
-        WHERE 1=1 {filter_sql}
+        WHERE g.system_id = 2 {filter_sql}
     """, (branch_ids,) if branch_ids else ())
 
     rows = turon_cur.fetchall()
@@ -213,22 +214,27 @@ def sync_groups(turon_cur, mgmt_cur, branch_ids):
 
 
 def sync_students(turon_cur, mgmt_cur, branch_ids):
+    # Only students in school (system_id=2) groups
     if branch_ids:
         turon_cur.execute("""
             SELECT DISTINCT gs.student_id
             FROM group_group_students gs
             JOIN group_group g ON g.id = gs.group_id
-            WHERE g.branch_id = ANY(%s)
+            WHERE g.system_id = 2 AND g.branch_id = ANY(%s)
         """, (branch_ids,))
-        student_ids = [r[0] for r in turon_cur.fetchall()]
-        if not student_ids:
-            print(f"  Students:         0 upserted")
-            return
-        filter_sql = "WHERE s.id = ANY(%s)"
-        params = (student_ids,)
     else:
-        filter_sql = ""
-        params = ()
+        turon_cur.execute("""
+            SELECT DISTINCT gs.student_id
+            FROM group_group_students gs
+            JOIN group_group g ON g.id = gs.group_id
+            WHERE g.system_id = 2
+        """)
+    student_ids = [r[0] for r in turon_cur.fetchall()]
+    if not student_ids:
+        print(f"  Students:         0 upserted")
+        return
+    filter_sql = "WHERE s.id = ANY(%s)"
+    params = (student_ids,)
 
     turon_cur.execute(f"""
         SELECT s.id, s.user_id, u.name, u.surname,
@@ -260,7 +266,7 @@ def sync_student_groups(turon_cur, mgmt_cur, branch_ids):
         SELECT gs.student_id, gs.group_id
         FROM group_group_students gs
         JOIN group_group g ON g.id = gs.group_id
-        WHERE 1=1 {filter_sql}
+        WHERE g.system_id = 2 {filter_sql}
     """, (branch_ids,) if branch_ids else ())
 
     rows = turon_cur.fetchall()
@@ -410,7 +416,7 @@ def sync_attendance_history(turon_cur, mgmt_cur, branch_ids):
                    a.payment, a.ball_percentage, a.present_days, a.absent_days, a.discount
             FROM attendances_attendancepermonth a
             JOIN group_group g ON g.id = a.group_id
-            WHERE g.branch_id = ANY(%s)
+            WHERE g.system_id = 2 AND g.branch_id = ANY(%s)
         """, (branch_ids,))
     else:
         turon_cur.execute("""
@@ -420,6 +426,7 @@ def sync_attendance_history(turon_cur, mgmt_cur, branch_ids):
                    a.payment, a.ball_percentage, a.present_days, a.absent_days, a.discount
             FROM attendances_attendancepermonth a
             JOIN group_group g ON g.id = a.group_id
+            WHERE g.system_id = 2
         """)
 
     rows = turon_cur.fetchall()
@@ -500,10 +507,15 @@ def sync_lesson_plans(turon_cur, mgmt_cur, branch_ids):
             SELECT lp.id, lp.teacher_id, lp.group_id, lp.ball, lp.date
             FROM lesson_plan_lessonplan lp
             JOIN group_group g ON g.id = lp.group_id
-            WHERE g.branch_id = ANY(%s)
+            WHERE g.system_id = 2 AND g.branch_id = ANY(%s)
         """, (branch_ids,))
     else:
-        turon_cur.execute("SELECT id, teacher_id, group_id, ball, date FROM lesson_plan_lessonplan")
+        turon_cur.execute("""
+            SELECT lp.id, lp.teacher_id, lp.group_id, lp.ball, lp.date
+            FROM lesson_plan_lessonplan lp
+            JOIN group_group g ON g.id = lp.group_id
+            WHERE g.system_id = 2
+        """)
 
     rows = turon_cur.fetchall()
     for r in rows:
