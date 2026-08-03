@@ -148,6 +148,7 @@ class MissionExternalSync(BaseModel):
 
 class ExternalMissionOut(BaseModel):
     id: int
+    management_id: Optional[int] = None
     source: str
     title: str
     description: Optional[str] = None
@@ -1590,7 +1591,7 @@ def list_gennis_missions(
 
     results = [
         ExternalMissionOut(
-            id=m.id, source="gennis", title=m.title, description=m.description,
+            id=m.id, management_id=m.management_id, source="gennis", title=m.title, description=m.description,
             category=m.category, status=m.status, creator_id=m.creator_id,
             creator_name=users.get(m.creator_id),
             executor_id=m.executor_id, executor_name=users.get(m.executor_id),
@@ -1639,7 +1640,7 @@ def list_turon_missions(
 
     results = [
         ExternalMissionOut(
-            id=m.id, source="turon", title=m.title, description=m.description,
+            id=m.id, management_id=m.management_id, source="turon", title=m.title, description=m.description,
             category=m.category, status=m.status, creator_id=m.creator_id,
             creator_name=users.get(m.creator_id),
             executor_id=m.executor_id, executor_name=users.get(m.executor_id),
