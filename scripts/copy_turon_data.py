@@ -128,27 +128,33 @@ def sync_group_reasons(turon_cur, mgmt_cur):
 # ── Core entities ─────────────────────────────────────────────────────────────
 
 def sync_teachers(turon_cur, mgmt_cur, branch_ids):
-    filter_sql = ""
-    params = ()
+    # Only sync teachers who teach school system (system_id=2) groups
     if branch_ids:
         turon_cur.execute("""
-            SELECT DISTINCT teacher_id FROM teachers_teacher_branches
-            WHERE branch_id = ANY(%s)
+            SELECT DISTINCT gg.teacher_id
+            FROM group_group_teacher gg
+            JOIN group_group g ON g.id = gg.group_id
+            WHERE g.system_id = 2 AND g.branch_id = ANY(%s)
         """, (branch_ids,))
-        teacher_ids = [r[0] for r in turon_cur.fetchall()]
-        if not teacher_ids:
-            print(f"  Teachers:         0 upserted")
-            return
-        filter_sql = "WHERE t.id = ANY(%s)"
-        params = (teacher_ids,)
+    else:
+        turon_cur.execute("""
+            SELECT DISTINCT gg.teacher_id
+            FROM group_group_teacher gg
+            JOIN group_group g ON g.id = gg.group_id
+            WHERE g.system_id = 2
+        """)
+    teacher_ids = [r[0] for r in turon_cur.fetchall()]
+    if not teacher_ids:
+        print(f"  Teachers:         0 upserted")
+        return
 
-    turon_cur.execute(f"""
+    turon_cur.execute("""
         SELECT t.id, t.user_id, u.name, u.surname, u.username,
                t.color, t.total_students, t.salary_percentage, t.deleted
         FROM teachers_teacher t
         JOIN user_customuser u ON u.id = t.user_id
-        {filter_sql}
-    """, params)
+        WHERE t.id = ANY(%s)
+    """, (teacher_ids,))
 
     rows = turon_cur.fetchall()
     for r in rows:
@@ -434,11 +440,17 @@ def sync_capital_terms(turon_cur, mgmt_cur, branch_ids):
 
 
 def sync_student_payments(turon_cur, mgmt_cur, branch_ids):
-    filter_sql = "AND branch_id = ANY(%s)" if branch_ids else ""
+    # Only students in school system (system_id=2) groups
+    filter_sql = "AND sp.branch_id = ANY(%s)" if branch_ids else ""
     turon_cur.execute(f"""
-        SELECT id, student_id, branch_id, payment_sum, extra_payment, date, deleted
-        FROM students_studentpayment
-        WHERE 1=1 {filter_sql}
+        SELECT sp.id, sp.student_id, sp.branch_id, sp.payment_sum, sp.extra_payment, sp.date, sp.deleted
+        FROM students_studentpayment sp
+        WHERE sp.student_id IN (
+            SELECT DISTINCT gs.student_id
+            FROM group_group_students gs
+            JOIN group_group g ON g.id = gs.group_id
+            WHERE g.system_id = 2
+        ) {filter_sql}
     """, (branch_ids,) if branch_ids else ())
 
     rows = turon_cur.fetchall()
@@ -502,12 +514,18 @@ def sync_attendance_history(turon_cur, mgmt_cur, branch_ids):
 # ── Teacher analytics ─────────────────────────────────────────────────────────
 
 def sync_teacher_salaries(turon_cur, mgmt_cur, branch_ids):
-    filter_sql = "AND branch_id = ANY(%s)" if branch_ids else ""
+    # Only school teachers (system_id=2 group teachers)
+    filter_sql = "AND ts.branch_id = ANY(%s)" if branch_ids else ""
     turon_cur.execute(f"""
-        SELECT id, teacher_id, branch_id, month_date,
-               total_salary, remaining_salary, taken_salary, percentage
-        FROM teachers_teachersalary
-        WHERE 1=1 {filter_sql}
+        SELECT ts.id, ts.teacher_id, ts.branch_id, ts.month_date,
+               ts.total_salary, ts.remaining_salary, ts.taken_salary, ts.percentage
+        FROM teachers_teachersalary ts
+        WHERE ts.teacher_id IN (
+            SELECT DISTINCT gg.teacher_id
+            FROM group_group_teacher gg
+            JOIN group_group g ON g.id = gg.group_id
+            WHERE g.system_id = 2
+        ) {filter_sql}
     """, (branch_ids,) if branch_ids else ())
 
     rows = turon_cur.fetchall()
@@ -528,12 +546,18 @@ def sync_teacher_salaries(turon_cur, mgmt_cur, branch_ids):
 
 
 def sync_teacher_salary_payments(turon_cur, mgmt_cur, branch_ids):
-    filter_sql = "AND branch_id = ANY(%s)" if branch_ids else ""
+    # Only school teachers (system_id=2 group teachers)
+    filter_sql = "AND tsl.branch_id = ANY(%s)" if branch_ids else ""
     turon_cur.execute(f"""
-        SELECT id, teacher_id, salary_id_id, branch_id,
-               salary, date, comment, deleted
-        FROM teachers_teachersalarylist
-        WHERE 1=1 {filter_sql}
+        SELECT tsl.id, tsl.teacher_id, tsl.salary_id_id, tsl.branch_id,
+               tsl.salary, tsl.date, tsl.comment, tsl.deleted
+        FROM teachers_teachersalarylist tsl
+        WHERE tsl.teacher_id IN (
+            SELECT DISTINCT gg.teacher_id
+            FROM group_group_teacher gg
+            JOIN group_group g ON g.id = gg.group_id
+            WHERE g.system_id = 2
+        ) {filter_sql}
     """, (branch_ids,) if branch_ids else ())
 
     rows = turon_cur.fetchall()
