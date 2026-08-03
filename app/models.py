@@ -1010,3 +1010,324 @@ class RoomImage(Base):
     created_at = Column(DateTime, server_default=func.now())
 
     room = relationship("Room", back_populates="images", lazy="selectin")
+
+
+# ── Turon Mirror Tables ───────────────────────────────────────────────────────
+
+class TuronUserLink(Base):
+    """Maps a management user to a Turon user account (auth_user)."""
+    __tablename__ = "turon_user_link"
+
+    id                 = Column(BigInteger, primary_key=True, index=True)
+    management_user_id = Column(BigInteger, ForeignKey("user.id"), nullable=False, index=True)
+    turon_user_id      = Column(Integer, nullable=False, unique=True)
+    branch_id          = Column(Integer, nullable=True)
+    branch_name        = Column(String(255), nullable=True)
+    created_at         = Column(DateTime, server_default=func.now())
+
+    user = relationship("User", foreign_keys=[management_user_id])
+
+
+class TuronBranch(Base):
+    __tablename__ = "turon_branch"
+
+    id           = Column(BigInteger, primary_key=True, index=True)
+    turon_id     = Column(Integer, nullable=False, unique=True)
+    name         = Column(String(255), nullable=True)
+    code         = Column(Integer, nullable=True)
+    address      = Column(String(500), nullable=True)
+    phone_number = Column(String(50), nullable=True)
+    district     = Column(String(255), nullable=True)
+    deleted      = Column(Boolean, default=False)
+    synced_at    = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
+class TuronLanguage(Base):
+    __tablename__ = "turon_language"
+
+    id        = Column(BigInteger, primary_key=True, index=True)
+    turon_id  = Column(Integer, nullable=False, unique=True)
+    name      = Column(String(100), nullable=False)
+    synced_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
+class TuronSubject(Base):
+    __tablename__ = "turon_subject"
+
+    id        = Column(BigInteger, primary_key=True, index=True)
+    turon_id  = Column(Integer, nullable=False, unique=True)
+    name      = Column(String(255), nullable=False)
+    disabled  = Column(Boolean, default=False)
+    synced_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
+class TuronSubjectLevel(Base):
+    __tablename__ = "turon_subject_level"
+
+    id               = Column(BigInteger, primary_key=True, index=True)
+    turon_id         = Column(Integer, nullable=False, unique=True)
+    turon_subject_id = Column(Integer, nullable=True, index=True)
+    name             = Column(String(255), nullable=False)
+    disabled         = Column(Boolean, default=False)
+    synced_at        = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
+class TuronGroupReason(Base):
+    __tablename__ = "turon_group_reason"
+
+    id        = Column(BigInteger, primary_key=True, index=True)
+    turon_id  = Column(Integer, nullable=False, unique=True)
+    reason    = Column(String(500), nullable=True)
+    synced_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
+class TuronTeacher(Base):
+    __tablename__ = "turon_teacher"
+
+    id                 = Column(BigInteger, primary_key=True, index=True)
+    turon_id           = Column(Integer, nullable=False, unique=True)
+    turon_user_id      = Column(Integer, nullable=True)
+    management_user_id = Column(BigInteger, nullable=True, index=True)
+    name               = Column(String(255), nullable=True)
+    surname            = Column(String(255), nullable=True)
+    username           = Column(String(100), nullable=True)
+    color              = Column(String(50), nullable=True)
+    total_students     = Column(Integer, nullable=True)
+    salary_percentage  = Column(Integer, nullable=True)
+    deleted            = Column(Boolean, default=False)
+    synced_at          = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
+class TuronRoom(Base):
+    __tablename__ = "turon_room"
+
+    id             = Column(BigInteger, primary_key=True, index=True)
+    turon_id       = Column(Integer, nullable=False, unique=True)
+    name           = Column(String(255), nullable=True)
+    capacity       = Column(Integer, nullable=True)
+    branch_turon_id = Column(Integer, nullable=True, index=True)
+    deleted        = Column(Boolean, default=False)
+    synced_at      = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
+class TuronGroup(Base):
+    __tablename__ = "turon_group"
+
+    id               = Column(BigInteger, primary_key=True, index=True)
+    turon_id         = Column(Integer, nullable=False, unique=True)
+    name             = Column(String(255), nullable=True)
+    branch_turon_id  = Column(Integer, nullable=True, index=True)
+    subject_turon_id = Column(Integer, nullable=True)
+    teacher_turon_id = Column(Integer, nullable=True)
+    teacher_mgmt_id  = Column(BigInteger, nullable=True)
+    language_turon_id = Column(Integer, nullable=True)
+    price            = Column(Integer, nullable=True)
+    teacher_salary   = Column(Integer, nullable=True)
+    attendance_days  = Column(Integer, nullable=True)
+    status           = Column(Boolean, default=True)
+    deleted          = Column(Boolean, default=False)
+    created_date     = Column(Date, nullable=True)
+    synced_at        = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
+class TuronStudent(Base):
+    __tablename__ = "turon_student"
+
+    id              = Column(BigInteger, primary_key=True, index=True)
+    turon_id        = Column(Integer, nullable=False, unique=True)
+    turon_user_id   = Column(Integer, nullable=True)
+    name            = Column(String(255), nullable=True)
+    surname         = Column(String(255), nullable=True)
+    phone           = Column(String(50), nullable=True)
+    parents_number  = Column(String(50), nullable=True)
+    born_date       = Column(Date, nullable=True)
+    debt_status     = Column(BigInteger, nullable=True)
+    synced_at       = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
+turon_student_group_table = Table(
+    "turon_student_group", Base.metadata,
+    Column("student_turon_id", Integer, nullable=False),
+    Column("group_turon_id", Integer, nullable=False),
+    UniqueConstraint("student_turon_id", "group_turon_id", name="uq_turon_student_group"),
+)
+
+
+class TuronLead(Base):
+    __tablename__ = "turon_lead"
+
+    id              = Column(BigInteger, primary_key=True, index=True)
+    turon_id        = Column(Integer, nullable=False, unique=True)
+    name            = Column(String(255), nullable=True)
+    phone           = Column(String(50), nullable=True)
+    branch_turon_id = Column(Integer, nullable=True, index=True)
+    finished        = Column(Boolean, default=False)
+    deleted         = Column(Boolean, default=False)
+    created         = Column(Date, nullable=True)
+    synced_at       = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
+class TuronOverheadType(Base):
+    __tablename__ = "turon_overhead_type"
+
+    id              = Column(BigInteger, primary_key=True, index=True)
+    turon_id        = Column(Integer, nullable=False, unique=True)
+    name            = Column(String(255), nullable=True)
+    cost            = Column(BigInteger, nullable=True)
+    changeable      = Column(Boolean, default=True)
+    branch_turon_id = Column(Integer, nullable=True)
+    management_id   = Column(Integer, nullable=True)
+    deleted         = Column(Boolean, default=False)
+    synced_at       = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
+class TuronOverhead(Base):
+    __tablename__ = "turon_overhead"
+
+    id                    = Column(BigInteger, primary_key=True, index=True)
+    turon_id              = Column(Integer, nullable=False, unique=True)
+    overhead_type_turon_id = Column(Integer, nullable=True, index=True)
+    branch_turon_id       = Column(Integer, nullable=True, index=True)
+    amount                = Column(BigInteger, nullable=True)
+    date                  = Column(Date, nullable=True)
+    deleted               = Column(Boolean, default=False)
+    synced_at             = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
+class TuronCapitalCategory(Base):
+    __tablename__ = "turon_capital_category"
+
+    id        = Column(BigInteger, primary_key=True, index=True)
+    turon_id  = Column(Integer, nullable=False, unique=True)
+    name      = Column(String(100), nullable=True)
+    synced_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
+class TuronCapital(Base):
+    __tablename__ = "turon_capital"
+
+    id               = Column(BigInteger, primary_key=True, index=True)
+    turon_id         = Column(Integer, nullable=False, unique=True)
+    name             = Column(String(255), nullable=True)
+    price            = Column(BigInteger, nullable=True)
+    total_down_cost  = Column(BigInteger, nullable=True)
+    branch_turon_id  = Column(Integer, nullable=True, index=True)
+    category_turon_id = Column(Integer, nullable=True)
+    added_date       = Column(Date, nullable=True)
+    deleted          = Column(Boolean, default=False)
+    synced_at        = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
+class TuronCapitalTerm(Base):
+    __tablename__ = "turon_capital_term"
+
+    id               = Column(BigInteger, primary_key=True, index=True)
+    turon_id         = Column(Integer, nullable=False, unique=True)
+    capital_turon_id = Column(Integer, nullable=True, index=True)
+    down_cost        = Column(BigInteger, nullable=True)
+    month_date       = Column(Date, nullable=True)
+    synced_at        = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
+class TuronStudentPayment(Base):
+    __tablename__ = "turon_student_payment"
+
+    id               = Column(BigInteger, primary_key=True, index=True)
+    turon_id         = Column(Integer, nullable=False, unique=True)
+    student_turon_id = Column(Integer, nullable=True, index=True)
+    group_turon_id   = Column(Integer, nullable=True)
+    branch_turon_id  = Column(Integer, nullable=True, index=True)
+    payment_sum      = Column(BigInteger, nullable=True)
+    extra_payment    = Column(BigInteger, nullable=True)
+    payment_date     = Column(Date, nullable=True)
+    deleted          = Column(Boolean, default=False)
+    synced_at        = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
+class TuronAttendanceHistoryStudent(Base):
+    __tablename__ = "turon_attendance_history_student"
+
+    id               = Column(BigInteger, primary_key=True, index=True)
+    turon_id         = Column(Integer, nullable=False, unique=True)
+    student_turon_id = Column(Integer, nullable=True, index=True)
+    teacher_turon_id = Column(Integer, nullable=True)
+    group_turon_id   = Column(Integer, nullable=True, index=True)
+    branch_turon_id  = Column(Integer, nullable=True, index=True)
+    month_date       = Column(Date, nullable=True)
+    total_debt       = Column(BigInteger, nullable=True)
+    remaining_debt   = Column(BigInteger, nullable=True)
+    payment          = Column(BigInteger, nullable=True)
+    ball_percentage  = Column(Integer, nullable=True)
+    present_days     = Column(Integer, nullable=True)
+    absent_days      = Column(Integer, nullable=True)
+    discount         = Column(Integer, nullable=True)
+    synced_at        = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
+class TuronTeacherSalary(Base):
+    __tablename__ = "turon_teacher_salary"
+
+    id               = Column(BigInteger, primary_key=True, index=True)
+    turon_id         = Column(Integer, nullable=False, unique=True)
+    teacher_turon_id = Column(Integer, nullable=True, index=True)
+    branch_turon_id  = Column(Integer, nullable=True, index=True)
+    month_date       = Column(Date, nullable=True)
+    total_salary     = Column(BigInteger, nullable=True)
+    remaining_salary = Column(BigInteger, nullable=True)
+    taken_salary     = Column(BigInteger, nullable=True)
+    percentage       = Column(Integer, nullable=True)
+    synced_at        = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
+class TuronTeacherSalaryPayment(Base):
+    __tablename__ = "turon_teacher_salary_payment"
+
+    id               = Column(BigInteger, primary_key=True, index=True)
+    turon_id         = Column(Integer, nullable=False, unique=True)
+    teacher_turon_id = Column(Integer, nullable=True, index=True)
+    salary_turon_id  = Column(Integer, nullable=True)
+    branch_turon_id  = Column(Integer, nullable=True)
+    salary           = Column(BigInteger, nullable=True)
+    date             = Column(Date, nullable=True)
+    comment          = Column(String(300), nullable=True)
+    deleted          = Column(Boolean, default=False)
+    synced_at        = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
+class TuronLessonPlan(Base):
+    __tablename__ = "turon_lesson_plan"
+
+    id               = Column(BigInteger, primary_key=True, index=True)
+    turon_id         = Column(Integer, nullable=False, unique=True)
+    teacher_turon_id = Column(Integer, nullable=True, index=True)
+    group_turon_id   = Column(Integer, nullable=True)
+    ball             = Column(Integer, nullable=True)
+    date             = Column(Date, nullable=True)
+    synced_at        = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
+class TuronTeacherObservationDay(Base):
+    __tablename__ = "turon_teacher_observation_day"
+
+    id               = Column(BigInteger, primary_key=True, index=True)
+    turon_id         = Column(Integer, nullable=False, unique=True)
+    teacher_turon_id = Column(Integer, nullable=True, index=True)
+    group_turon_id   = Column(Integer, nullable=True)
+    user_turon_id    = Column(Integer, nullable=True)
+    day              = Column(Date, nullable=True)
+    average          = Column(Integer, nullable=True)
+    synced_at        = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
+class TuronTeacherGroupStatistics(Base):
+    __tablename__ = "turon_teacher_group_statistics"
+
+    id               = Column(BigInteger, primary_key=True, index=True)
+    turon_id         = Column(Integer, nullable=False, unique=True)
+    teacher_turon_id = Column(Integer, nullable=True, index=True)
+    reason_turon_id  = Column(Integer, nullable=True)
+    branch_turon_id  = Column(Integer, nullable=True)
+    number_students  = Column(Integer, nullable=True)
+    percentage       = Column(Integer, nullable=True)
+    date             = Column(Date, nullable=True)
+    synced_at        = Column(DateTime, server_default=func.now(), onupdate=func.now())
