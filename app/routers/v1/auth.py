@@ -1,6 +1,6 @@
 import secrets
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 from datetime import datetime, timedelta
@@ -73,6 +73,15 @@ class TokenRefreshRequest(BaseModel):
 class PasswordChange(BaseModel):
     old_password: str
     new_password: str = Field(..., min_length=8)
+
+
+class EmailChange(BaseModel):
+    new_email: EmailStr
+    password: str
+
+
+class UsernameChange(BaseModel):
+    new_username: str = Field(..., min_length=3, max_length=100)
 
 
 # ========== HELPER FUNCTIONS ==========
@@ -157,6 +166,32 @@ def register(user_data: UserRegister, db: Session = Depends(get_db)):
         expires_in=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
         user=user_response
     )
+
+
+@router.get('/check-email')
+def check_email(
+        email: EmailStr = Query(...),
+        db: Session = Depends(get_db)
+):
+    """Public — check whether an email is already registered, before signup/change"""
+    existing_user = db.query(models.User).filter(models.User.email == email).first()
+    return {"email": email, "available": existing_user is None}
+
+
+@router.get('/check-username')
+def check_username(
+        username: str = Query(...),
+        db: Session = Depends(get_db)
+):
+    """Public — check whether a username is already taken, before signup/change"""
+    if not re.match(r"^[a-zA-Z0-9_.]+$", username):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Username may only contain letters, numbers, underscores, and periods"
+        )
+
+    existing_user = db.query(models.User).filter(models.User.username == username).first()
+    return {"username": username, "available": existing_user is None}
 
 
 @router.post('/login', response_model=AuthResponse)
@@ -429,6 +464,86 @@ def change_password(
     db.commit()
 
     return {"message": "Password changed successfully"}
+
+
+@router.post('/change-email')
+def change_email(
+        email_data: EmailChange,
+        current_user: models.User = Depends(get_current_user),
+        db: Session = Depends(get_db)
+):
+    """Change email for authenticated user — requires current password as confirmation"""
+
+    # Check if user uses Google OAuth
+    if current_user.auth_provider == "google":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot change email for Google OAuth users"
+        )
+
+    # Verify current password — support both bcrypt and migrated Werkzeug hashes
+    hashed = current_user.hashed_password or ""
+    is_werkzeug = "$" in hashed and not hashed.startswith("$")
+    password_ok = (
+        _verify_werkzeug(email_data.password, hashed)
+        if is_werkzeug
+        else verify_password(email_data.password, hashed)
+    )
+    if not password_ok:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect password"
+        )
+
+    # Check if new email is already in use
+    existing_user = db.query(models.User).filter(
+        models.User.email == email_data.new_email,
+        models.User.id != current_user.id,
+    ).first()
+    if existing_user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Email already in use"
+        )
+
+    # Update email — resets verification, since the new address hasn't been confirmed
+    current_user.email = email_data.new_email
+    current_user.is_verified = False
+    current_user.updated_at = datetime.utcnow()
+    db.commit()
+
+    return {"message": "Email changed successfully. Please log in again with your new email."}
+
+
+@router.post('/change-username')
+def change_username(
+        username_data: UsernameChange,
+        current_user: models.User = Depends(get_current_user),
+        db: Session = Depends(get_db)
+):
+    """Change username for authenticated user — no password confirmation, username isn't a login secret"""
+
+    if not re.match(r"^[a-zA-Z0-9_.]+$", username_data.new_username):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Username may only contain letters, numbers, underscores, and periods"
+        )
+
+    existing_user = db.query(models.User).filter(
+        models.User.username == username_data.new_username,
+        models.User.id != current_user.id,
+    ).first()
+    if existing_user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Username already taken"
+        )
+
+    current_user.username = username_data.new_username
+    current_user.updated_at = datetime.utcnow()
+    db.commit()
+
+    return {"message": "Username changed successfully"}
 
 
 @router.post('/refresh', response_model=AuthResponse)
