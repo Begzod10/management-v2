@@ -628,7 +628,7 @@ def seed_teacher_salaries(gc, mc):
             is_deleted       = EXCLUDED.is_deleted,
             synced_at        = NOW()
     """, rows)
-    mc.execute("SELECT setval('gennis_teacher_salary_id_seq', (SELECT MAX(id) FROM gennis_teacher_salary))")
+    reset_sequence(mc, "gennis_teacher_salary", "gennis_teacher_salary_id_seq")
     print(f"  Teacher salary seed:  {len(rows)} upserted")
 
 
@@ -682,7 +682,7 @@ def seed_assistent_salaries(gc, mc):
             is_deleted       = EXCLUDED.is_deleted,
             synced_at        = NOW()
     """, rows)
-    mc.execute("SELECT setval('gennis_assistent_salary_id_seq', (SELECT MAX(id) FROM gennis_assistent_salary))")
+    reset_sequence(mc, "gennis_assistent_salary", "gennis_assistent_salary_id_seq")
     print(f"  Assistent salary seed: {len(rows)} upserted")
 
 
@@ -727,7 +727,7 @@ def seed_staff_salaries(gc, mc):
             is_deleted       = EXCLUDED.is_deleted,
             synced_at        = NOW()
     """, rows, page_size=2000)
-    mc.execute("SELECT setval('gennis_staff_salary_id_seq', (SELECT MAX(id) FROM gennis_staff_salary))")
+    reset_sequence(mc, "gennis_staff_salary", "gennis_staff_salary_id_seq")
     print(f"  Staff salary seed:    {len(rows)} upserted")
 
 
@@ -761,7 +761,7 @@ def seed_teacher_black_salaries(gc, mc):
             status             = EXCLUDED.status,
             student_payment_id = EXCLUDED.student_payment_id
     """, rows, page_size=2000)
-    mc.execute("SELECT setval('gennis_teacher_black_salary_entry_id_seq', (SELECT MAX(id) FROM gennis_teacher_black_salary_entry))")
+    reset_sequence(mc, "gennis_teacher_black_salary_entry", "gennis_teacher_black_salary_entry_id_seq")
     print(f"  Black salary seed:    {len(rows)} upserted")
 
 
@@ -800,7 +800,7 @@ def seed_fine_reports(gc, mc):
             amount              = EXCLUDED.amount,
             reason              = EXCLUDED.reason
     """, rows, page_size=2000)
-    mc.execute("SELECT setval('gennis_fine_report_id_seq', (SELECT MAX(id) FROM gennis_fine_report))")
+    reset_sequence(mc, "gennis_fine_report", "gennis_fine_report_id_seq")
     print(f"  Fine report seed:     {len(rows)} upserted")
 
 
@@ -847,7 +847,7 @@ def seed_attendance_history_teacher(gc, mc):
             status           = EXCLUDED.status,
             synced_at        = NOW()
     """, rows, page_size=2000)
-    mc.execute("SELECT setval('gennis_attendance_history_teacher_id_seq', (SELECT MAX(id) FROM gennis_attendance_history_teacher))")
+    reset_sequence(mc, "gennis_attendance_history_teacher", "gennis_attendance_history_teacher_id_seq")
     print(f"  Teacher attendance history seed: {len(rows)} upserted")
 
 
@@ -887,7 +887,7 @@ def sync_charities(gc, mc):
             calendar_year  = EXCLUDED.calendar_year,
             group_id       = EXCLUDED.group_id
     """, [(r[0], r[1], r[2], r[3], r[4], r[5], r[6], False) for r in rows])
-    mc.execute("SELECT setval('gennis_student_charity_id_seq', (SELECT MAX(id) FROM gennis_student_charity))")
+    reset_sequence(mc, "gennis_student_charity", "gennis_student_charity_id_seq")
     print(f"  Charities:            {len(rows)} upserted")
 
 
@@ -1004,7 +1004,7 @@ def seed_attendance_history(gc, mc):
             status         = EXCLUDED.status,
             synced_at      = NOW()
     """, rows, page_size=2000)
-    mc.execute("SELECT setval('gennis_attendance_history_student_id_seq', (SELECT MAX(id) FROM gennis_attendance_history_student))")
+    reset_sequence(mc, "gennis_attendance_history_student", "gennis_attendance_history_student_id_seq")
     print(f"  Attendance history seed: {len(rows)} upserted")
 
 
