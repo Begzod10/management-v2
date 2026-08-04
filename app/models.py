@@ -1349,6 +1349,24 @@ class TuronTeacherGroupStatistics(Base):
     synced_at        = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
 
+class GennisAttendanceHistoryTeacher(Base):
+    __tablename__ = "gennis_attendance_history_teacher"
+
+    id               = Column(BigInteger, primary_key=True, index=True)
+    teacher_id       = Column(Integer, nullable=True)
+    teacher_name     = Column(String(511), nullable=True)
+    total_salary     = Column(Integer, nullable=False, default=0)
+    subject_id       = Column(Integer, nullable=True)
+    group_id         = Column(Integer, nullable=True)
+    taken_money      = Column(Integer, nullable=False, default=0)
+    remaining_salary = Column(Integer, nullable=False, default=0)
+    location_id      = Column(Integer, nullable=True)
+    calendar_month   = Column(Integer, nullable=False)
+    calendar_year    = Column(Integer, nullable=False)
+    status           = Column(Boolean, nullable=False, default=False)
+    synced_at        = Column(DateTime, server_default=func.now())
+
+
 class GennisLocationSubject(Base):
     """Admin-curated list of important subjects per branch.
 

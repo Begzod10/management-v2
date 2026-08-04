@@ -609,6 +609,171 @@ def seed_assistent_salaries(gc, mc):
     print(f"  Assistent salary seed: {len(rows)} upserted")
 
 
+# ── staff salary totals seed ──────────────────────────────────────────────────
+
+def seed_staff_salaries(gc, mc):
+    """Full UPSERT of staffsalary → gennis_staff_salary (monthly totals)."""
+    gc.execute("""
+        SELECT
+            ss.id,
+            ss.staff_id,
+            COALESCE(u.name || ' ' || u.surname, '') AS staff_name,
+            ss.location_id,
+            COALESCE(ss.total_salary, 0),
+            COALESCE(ss.taken_money, 0),
+            COALESCE(ss.remaining_salary, 0),
+            COALESCE(ss.status, false),
+            EXTRACT(MONTH FROM cm.date)::int,
+            EXTRACT(YEAR  FROM cy.date)::int
+        FROM staffsalary ss
+        JOIN calendarmonth cm ON cm.id = ss.calendar_month
+        JOIN calendaryear  cy ON cy.id = ss.calendar_year
+        LEFT JOIN staff s ON s.id = ss.staff_id
+        LEFT JOIN users u ON u.id = s.user_id
+        ORDER BY ss.id
+    """)
+    rows = gc.fetchall()
+    if not rows:
+        print("  Staff salary seed:    0 records")
+        return
+    execute_values(mc, """
+        INSERT INTO gennis_staff_salary
+            (id, staff_id, staff_name, location_id,
+             total_salary, taken_money, remaining_salary,
+             is_deleted, calendar_month, calendar_year)
+        VALUES %s
+        ON CONFLICT (id) DO UPDATE SET
+            staff_name       = EXCLUDED.staff_name,
+            total_salary     = EXCLUDED.total_salary,
+            taken_money      = EXCLUDED.taken_money,
+            remaining_salary = EXCLUDED.remaining_salary,
+            is_deleted       = EXCLUDED.is_deleted,
+            synced_at        = NOW()
+    """, rows, page_size=2000)
+    mc.execute("SELECT setval('gennis_staff_salary_id_seq', (SELECT MAX(id) FROM gennis_staff_salary))")
+    print(f"  Staff salary seed:    {len(rows)} upserted")
+
+
+# ── teacher black salary entries seed ─────────────────────────────────────────
+
+def seed_teacher_black_salaries(gc, mc):
+    """Full UPSERT of teacher_black_salary → gennis_teacher_black_salary_entry."""
+    gc.execute("""
+        SELECT
+            id,
+            salary_id,
+            student_id,
+            COALESCE(total_salary, 0),
+            COALESCE(status, false),
+            payment_id
+        FROM teacher_black_salary
+        ORDER BY id
+    """)
+    rows = gc.fetchall()
+    if not rows:
+        print("  Black salary seed:    0 records")
+        return
+    execute_values(mc, """
+        INSERT INTO gennis_teacher_black_salary_entry
+            (id, teacher_salary_id, student_id, amount, status, student_payment_id)
+        VALUES %s
+        ON CONFLICT (id) DO UPDATE SET
+            teacher_salary_id  = EXCLUDED.teacher_salary_id,
+            student_id         = EXCLUDED.student_id,
+            amount             = EXCLUDED.amount,
+            status             = EXCLUDED.status,
+            student_payment_id = EXCLUDED.student_payment_id
+    """, rows, page_size=2000)
+    mc.execute("SELECT setval('gennis_teacher_black_salary_entry_id_seq', (SELECT MAX(id) FROM gennis_teacher_black_salary_entry))")
+    print(f"  Black salary seed:    {len(rows)} upserted")
+
+
+# ── fine report seed ───────────────────────────────────────────────────────────
+
+def seed_fine_reports(gc, mc):
+    """Full UPSERT of finereport → gennis_fine_report."""
+    gc.execute("""
+        SELECT
+            fr.id,
+            fr.teacher_salary_id,
+            fr.assistent_salary_id,
+            EXTRACT(MONTH FROM cm.date)::int,
+            EXTRACT(YEAR  FROM cy.date)::int,
+            COALESCE(fr.amount, 0),
+            COALESCE(fr.reason, '')
+        FROM finereport fr
+        JOIN calendarmonth cm ON cm.id = fr.calendar_month
+        JOIN calendaryear  cy ON cy.id = fr.calendar_year
+        ORDER BY fr.id
+    """)
+    rows = gc.fetchall()
+    if not rows:
+        print("  Fine report seed:     0 records")
+        return
+    execute_values(mc, """
+        INSERT INTO gennis_fine_report
+            (id, teacher_salary_id, assistent_salary_id,
+             calendar_month, calendar_year, amount, reason)
+        VALUES %s
+        ON CONFLICT (id) DO UPDATE SET
+            teacher_salary_id   = EXCLUDED.teacher_salary_id,
+            assistent_salary_id = EXCLUDED.assistent_salary_id,
+            calendar_month      = EXCLUDED.calendar_month,
+            calendar_year       = EXCLUDED.calendar_year,
+            amount              = EXCLUDED.amount,
+            reason              = EXCLUDED.reason
+    """, rows, page_size=2000)
+    mc.execute("SELECT setval('gennis_fine_report_id_seq', (SELECT MAX(id) FROM gennis_fine_report))")
+    print(f"  Fine report seed:     {len(rows)} upserted")
+
+
+# ── teacher attendance history seed ───────────────────────────────────────────
+
+def seed_attendance_history_teacher(gc, mc):
+    """Full UPSERT of attendancehistoryteacher → gennis_attendance_history_teacher."""
+    gc.execute("""
+        SELECT
+            aht.id,
+            aht.teacher_id,
+            COALESCE(u.name || ' ' || u.surname, '') AS teacher_name,
+            COALESCE(aht.total_salary, 0),
+            aht.subject_id,
+            aht.group_id,
+            COALESCE(aht.taken_money, 0),
+            COALESCE(aht.remaining_salary, 0),
+            aht.location_id,
+            EXTRACT(MONTH FROM cm.date)::int,
+            EXTRACT(YEAR  FROM cy.date)::int,
+            COALESCE(aht.status, false)
+        FROM attendancehistoryteacher aht
+        JOIN calendarmonth cm ON cm.id = aht.calendar_month
+        JOIN calendaryear  cy ON cy.id = aht.calendar_year
+        LEFT JOIN teachers t ON t.id   = aht.teacher_id
+        LEFT JOIN users u    ON u.id   = t.user_id
+        ORDER BY aht.id
+    """)
+    rows = gc.fetchall()
+    if not rows:
+        print("  Teacher attendance history seed: 0 records")
+        return
+    execute_values(mc, """
+        INSERT INTO gennis_attendance_history_teacher
+            (id, teacher_id, teacher_name, total_salary,
+             subject_id, group_id, taken_money, remaining_salary,
+             location_id, calendar_month, calendar_year, status)
+        VALUES %s
+        ON CONFLICT (id) DO UPDATE SET
+            teacher_name     = EXCLUDED.teacher_name,
+            total_salary     = EXCLUDED.total_salary,
+            taken_money      = EXCLUDED.taken_money,
+            remaining_salary = EXCLUDED.remaining_salary,
+            status           = EXCLUDED.status,
+            synced_at        = NOW()
+    """, rows, page_size=2000)
+    mc.execute("SELECT setval('gennis_attendance_history_teacher_id_seq', (SELECT MAX(id) FROM gennis_attendance_history_teacher))")
+    print(f"  Teacher attendance history seed: {len(rows)} upserted")
+
+
 # ── student charities ─────────────────────────────────────────────────────────
 
 def sync_charities(gc, mc):
@@ -751,9 +916,13 @@ def main():
     parser.add_argument("--all", action="store_true",
                         help="Sync all records since 2026-01-01")
     parser.add_argument("--seed-salaries", action="store_true",
-                        help="Full UPSERT of all teachersalary/asistent_salary → management-v2 (initial load)")
+                        help="Full UPSERT of all teachersalary/asistent_salary/staffsalary → management-v2")
     parser.add_argument("--seed-attendance", action="store_true",
-                        help="Full UPSERT of all attendancehistorystudent → management-v2 (initial load)")
+                        help="Full UPSERT of all attendancehistorystudent/teacher → management-v2")
+    parser.add_argument("--seed-extra", action="store_true",
+                        help="Full UPSERT of teacher_black_salary and finereport → management-v2")
+    parser.add_argument("--seed-all", action="store_true",
+                        help="Run all seed functions (salaries + attendance + extra)")
     args = parser.parse_args()
 
     gennis = psycopg2.connect(GENNIS_DSN)
@@ -787,15 +956,23 @@ def main():
             print(f"  capital         since:  {cap_since}")
             print()
 
-            if args.seed_salaries:
+            if args.seed_salaries or args.seed_all:
                 print("Seeding salary totals (full upsert)…")
                 seed_teacher_salaries(gc, mc)
                 seed_assistent_salaries(gc, mc)
+                seed_staff_salaries(gc, mc)
                 print()
 
-            if args.seed_attendance:
+            if args.seed_attendance or args.seed_all:
                 print("Seeding attendance history (full upsert)…")
                 seed_attendance_history(gc, mc)
+                seed_attendance_history_teacher(gc, mc)
+                print()
+
+            if args.seed_extra or args.seed_all:
+                print("Seeding extra tables (full upsert)…")
+                seed_teacher_black_salaries(gc, mc)
+                seed_fine_reports(gc, mc)
                 print()
 
             sync_student_payments(gc, mc, sp_since)
