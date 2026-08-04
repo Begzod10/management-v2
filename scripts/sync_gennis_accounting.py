@@ -421,6 +421,119 @@ def sync_total_salary(gc, mc):
     print(f"  Assistent total_salary: {len(assistent_rows)} rows synced")
 
 
+# ── full salary seed (initial load) ───────────────────────────────────────────
+
+def seed_teacher_salaries(gc, mc):
+    """Full UPSERT of all teachersalary records → gennis_teacher_salary.
+
+    Includes aggregated black_salary per salary record.
+    Safe to re-run — uses ON CONFLICT (id) DO UPDATE.
+    """
+    gc.execute("""
+        SELECT
+            ts.id,
+            ts.teacher_id,
+            COALESCE(u.name || ' ' || u.surname, '') AS teacher_name,
+            ts.location_id,
+            COALESCE(ts.total_salary, 0)     AS total_salary,
+            COALESCE(ts.taken_money, 0)      AS taken_money,
+            COALESCE(bs.black_salary, 0)     AS black_salary,
+            COALESCE(ts.debt, 0)             AS debt,
+            COALESCE(ts.total_fine, 0)       AS fine,
+            COALESCE(ts.remaining_salary, 0) AS remaining_salary,
+            COALESCE(ts.status, false)       AS is_deleted,
+            EXTRACT(MONTH FROM cm.date)::int AS calendar_month,
+            EXTRACT(YEAR  FROM cy.date)::int AS calendar_year
+        FROM teachersalary ts
+        JOIN calendarmonth cm ON cm.id = ts.calendar_month
+        JOIN calendaryear  cy ON cy.id = ts.calendar_year
+        LEFT JOIN teachers t  ON t.id  = ts.teacher_id
+        LEFT JOIN users u     ON u.id  = t.user_id
+        LEFT JOIN (
+            SELECT salary_id, SUM(total_salary) AS black_salary
+            FROM teacher_black_salary
+            GROUP BY salary_id
+        ) bs ON bs.salary_id = ts.id
+        ORDER BY ts.id
+    """)
+    rows = gc.fetchall()
+    if not rows:
+        print("  Teacher salary seed:  0 records")
+        return
+    execute_values(mc, """
+        INSERT INTO gennis_teacher_salary
+            (id, teacher_id, teacher_name, location_id,
+             total_salary, taken_money, black_salary, debt, fine,
+             remaining_salary, is_deleted, calendar_month, calendar_year)
+        VALUES %s
+        ON CONFLICT (id) DO UPDATE SET
+            teacher_name     = EXCLUDED.teacher_name,
+            total_salary     = EXCLUDED.total_salary,
+            taken_money      = EXCLUDED.taken_money,
+            black_salary     = EXCLUDED.black_salary,
+            debt             = EXCLUDED.debt,
+            fine             = EXCLUDED.fine,
+            remaining_salary = EXCLUDED.remaining_salary,
+            is_deleted       = EXCLUDED.is_deleted,
+            synced_at        = NOW()
+    """, rows)
+    mc.execute("SELECT setval('gennis_teacher_salary_id_seq', (SELECT MAX(id) FROM gennis_teacher_salary))")
+    print(f"  Teacher salary seed:  {len(rows)} upserted")
+
+
+def seed_assistent_salaries(gc, mc):
+    """Full UPSERT of all asistent_salary records → gennis_assistent_salary."""
+    gc.execute("""
+        SELECT
+            a.id,
+            a.assisten_id,
+            COALESCE(u.name || ' ' || u.surname, '') AS assistent_name,
+            a.location_id,
+            COALESCE(a.total_salary, 0)     AS total_salary,
+            COALESCE(a.taken_money, 0)      AS taken_money,
+            COALESCE(abs.black_salary, 0)   AS black_salary,
+            COALESCE(a.debt, 0)             AS debt,
+            COALESCE(a.total_fine, 0)       AS fine,
+            COALESCE(a.remaining_salary, 0) AS remaining_salary,
+            COALESCE(a.status, false)       AS is_deleted,
+            EXTRACT(MONTH FROM cm.date)::int AS calendar_month,
+            EXTRACT(YEAR  FROM cy.date)::int AS calendar_year
+        FROM asistent_salary a
+        JOIN calendarmonth cm ON cm.id = a.calendar_month
+        JOIN calendaryear  cy ON cy.id = a.calendar_year
+        LEFT JOIN assistent ast ON ast.id = a.assisten_id
+        LEFT JOIN users u       ON u.id   = ast.user_id
+        LEFT JOIN (
+            SELECT salary_id, SUM(total_salary) AS black_salary
+            FROM asistent_black_salary
+            GROUP BY salary_id
+        ) abs ON abs.salary_id = a.id
+        ORDER BY a.id
+    """)
+    rows = gc.fetchall()
+    if not rows:
+        print("  Assistent salary seed: 0 records")
+        return
+    execute_values(mc, """
+        INSERT INTO gennis_assistent_salary
+            (id, assistent_id, assistent_name, location_id,
+             total_salary, taken_money, black_salary, debt, fine,
+             remaining_salary, is_deleted, calendar_month, calendar_year)
+        VALUES %s
+        ON CONFLICT (id) DO UPDATE SET
+            assistent_name   = EXCLUDED.assistent_name,
+            total_salary     = EXCLUDED.total_salary,
+            taken_money      = EXCLUDED.taken_money,
+            black_salary     = EXCLUDED.black_salary,
+            debt             = EXCLUDED.debt,
+            fine             = EXCLUDED.fine,
+            remaining_salary = EXCLUDED.remaining_salary,
+            is_deleted       = EXCLUDED.is_deleted,
+            synced_at        = NOW()
+    """, rows)
+    mc.execute("SELECT setval('gennis_assistent_salary_id_seq', (SELECT MAX(id) FROM gennis_assistent_salary))")
+    print(f"  Assistent salary seed: {len(rows)} upserted")
+
 
 # ── main ──────────────────────────────────────────────────────────────────────
 
@@ -430,6 +543,8 @@ def main():
                         help="Sync records since this date (YYYY-MM-DD)")
     parser.add_argument("--all", action="store_true",
                         help="Sync all records since 2026-01-01")
+    parser.add_argument("--seed-salaries", action="store_true",
+                        help="Full UPSERT of all teachersalary/asistent_salary → management-v2 (initial load)")
     args = parser.parse_args()
 
     gennis = psycopg2.connect(GENNIS_DSN)
@@ -462,6 +577,12 @@ def main():
             print(f"  overhead        since:  {oh_since}")
             print(f"  capital         since:  {cap_since}")
             print()
+
+            if args.seed_salaries:
+                print("Seeding salary totals (full upsert)…")
+                seed_teacher_salaries(gc, mc)
+                seed_assistent_salaries(gc, mc)
+                print()
 
             sync_student_payments(gc, mc, sp_since)
             sync_teacher_salary(gc, mc, ts_since)
