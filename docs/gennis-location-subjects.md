@@ -4,6 +4,17 @@ Admins use these endpoints to configure which subjects are relevant for each
 branch. The selected subjects appear in subject-selection UIs instead of the
 full unfiltered list.
 
+## Services
+
+| Service | Base path | Purpose |
+|---------|-----------|---------|
+| **management-v2** | `/api/v1/gennis-location-subjects` | Admin CRUD — configure which subjects belong to each branch |
+| **gennis-v2** | `/api/v1/subjects` | Read-only — fetch subjects for use in pickers |
+
+---
+
+## management-v2 endpoints
+
 Base path: `/api/v1/gennis-location-subjects`
 
 Quick reference:
@@ -129,3 +140,46 @@ No body.
 | Status | Detail |
 |--------|--------|
 | `404` | Entry not found |
+
+---
+
+## gennis-v2 endpoints
+
+Base path: `/api/v1/subjects`
+
+### GET `/subjects`
+
+Returns all subjects regardless of location. Used for general subject listing.
+
+#### Response `200`
+
+```json
+[
+  { "id": 4, "name": "Matematika" },
+  { "id": 7, "name": "Ingliz tili" }
+]
+```
+
+---
+
+### GET `/subjects/by-location/{location_id}`
+
+Returns only the subjects the admin has marked as important for this branch.
+Use in subject-picker dropdowns inside the gennis-v2 frontend.
+
+#### Path param
+
+| Param | Description |
+|-------|-------------|
+| `location_id` | `gennis_location.id` of the branch |
+
+#### Response `200`
+
+```json
+[
+  { "id": 4, "name": "Matematika" },
+  { "id": 7, "name": "Ingliz tili" }
+]
+```
+
+Results are sorted alphabetically by subject name.
