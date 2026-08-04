@@ -45,7 +45,11 @@ def get_last_date(mgmt_cur, table, date_col="paid_date"):
 
 
 def reset_sequence(mgmt_cur, table, seq_name):
-    mgmt_cur.execute(f"SELECT setval('{seq_name}', (SELECT MAX(id) FROM {table}))")
+    mgmt_cur.execute(
+        "SELECT EXISTS(SELECT 1 FROM pg_sequences WHERE sequencename = %s)", (seq_name,)
+    )
+    if mgmt_cur.fetchone()[0]:
+        mgmt_cur.execute(f"SELECT setval('{seq_name}', (SELECT MAX(id) FROM {table}))")
 
 
 # ── student payments ──────────────────────────────────────────────────────────
