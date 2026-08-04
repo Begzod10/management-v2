@@ -37,7 +37,10 @@ def get_last_date(mgmt_cur, table, date_col="paid_date"):
     mgmt_cur.execute(f"SELECT MAX({date_col}) FROM {table}")
     row = mgmt_cur.fetchone()
     if row and row[0]:
-        return row[0] - timedelta(days=3)  # overlap 3 days to catch partial syncs
+        # Cap at today-7 so future-dated records don't push the watermark past today
+        watermark = row[0] - timedelta(days=3)
+        cap = date.today() - timedelta(days=7)
+        return min(watermark, cap)
     return DEFAULT_SINCE
 
 
