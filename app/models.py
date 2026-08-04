@@ -1347,3 +1347,23 @@ class TuronTeacherGroupStatistics(Base):
     percentage       = Column(Integer, nullable=True)
     date             = Column(Date, nullable=True)
     synced_at        = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
+class GennisLocationSubject(Base):
+    """Admin-curated list of important subjects per branch.
+
+    Used by subject-selection UIs to filter the subject list to only what
+    the branch actually teaches.
+    """
+    __tablename__ = "gennis_location_subject"
+    __table_args__ = (
+        UniqueConstraint("subject_id", "location_id", name="uq_gls_subject_location"),
+    )
+
+    id          = Column(BigInteger, primary_key=True, index=True)
+    subject_id  = Column(BigInteger, ForeignKey("gennis_subject.id"), nullable=False, index=True)
+    location_id = Column(BigInteger, ForeignKey("gennis_location.id"), nullable=False, index=True)
+    created_at  = Column(DateTime, server_default=func.now())
+
+    subject  = relationship("GennisSubject")
+    location = relationship("GennisLocation")

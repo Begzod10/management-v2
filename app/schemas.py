@@ -890,6 +890,19 @@ class GennisSubjectOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class GennisLocationSubjectCreate(BaseModel):
+    subject_id: int
+    location_id: int
+
+
+class GennisLocationSubjectOut(BaseModel):
+    id: int
+    subject_id: int
+    location_id: int
+    subject: GennisSubjectOut
+    model_config = {"from_attributes": True}
+
+
 class GennisGroupCreate(BaseModel):
     gennis_id: int
     name: str

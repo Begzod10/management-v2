@@ -429,7 +429,12 @@ def sync_total_salary(gc, mc):
             ts.location_id,
             EXTRACT(MONTH FROM cm.date)::int AS calendar_month,
             EXTRACT(YEAR  FROM cy.date)::int AS calendar_year,
-            COALESCE(ts.total_salary, 0)     AS total_salary
+            COALESCE(ts.total_salary, 0)     AS total_salary,
+            COALESCE(ts.taken_money, 0)      AS taken_money,
+            COALESCE(ts.remaining_salary, 0) AS remaining_salary,
+            COALESCE(ts.debt, 0)             AS debt,
+            COALESCE(ts.extra, 0)            AS extra,
+            COALESCE(ts.total_fine, 0)       AS total_fine
         FROM teachersalary ts
         JOIN calendarmonth cm ON cm.id = ts.calendar_month
         JOIN calendaryear  cy ON cy.id = ts.calendar_year
@@ -439,9 +444,14 @@ def sync_total_salary(gc, mc):
     if teacher_rows:
         execute_values(mc, """
             UPDATE gennis_teacher_salary AS t
-            SET total_salary = d.total_salary,
-                synced_at    = NOW()
-            FROM (VALUES %s) AS d(teacher_id, location_id, calendar_month, calendar_year, total_salary)
+            SET total_salary     = d.total_salary,
+                taken_money      = d.taken_money,
+                remaining_salary = d.remaining_salary,
+                debt             = d.debt,
+                fine             = d.total_fine,
+                synced_at        = NOW()
+            FROM (VALUES %s) AS d(teacher_id, location_id, calendar_month, calendar_year,
+                                   total_salary, taken_money, remaining_salary, debt, extra, total_fine)
             WHERE t.teacher_id     = d.teacher_id
               AND t.location_id    = d.location_id
               AND t.calendar_month = d.calendar_month
@@ -455,7 +465,11 @@ def sync_total_salary(gc, mc):
             a.location_id,
             EXTRACT(MONTH FROM cm.date)::int AS calendar_month,
             EXTRACT(YEAR  FROM cy.date)::int AS calendar_year,
-            COALESCE(a.total_salary, 0)      AS total_salary
+            COALESCE(a.total_salary, 0)      AS total_salary,
+            COALESCE(a.taken_money, 0)       AS taken_money,
+            COALESCE(a.remaining_salary, 0)  AS remaining_salary,
+            COALESCE(a.debt, 0)              AS debt,
+            COALESCE(a.total_fine, 0)        AS total_fine
         FROM asistent_salary a
         JOIN calendarmonth cm ON cm.id = a.calendar_month
         JOIN calendaryear  cy ON cy.id = a.calendar_year
@@ -465,9 +479,14 @@ def sync_total_salary(gc, mc):
     if assistent_rows:
         execute_values(mc, """
             UPDATE gennis_assistent_salary AS t
-            SET total_salary = d.total_salary,
-                synced_at    = NOW()
-            FROM (VALUES %s) AS d(assistent_id, location_id, calendar_month, calendar_year, total_salary)
+            SET total_salary     = d.total_salary,
+                taken_money      = d.taken_money,
+                remaining_salary = d.remaining_salary,
+                debt             = d.debt,
+                fine             = d.total_fine,
+                synced_at        = NOW()
+            FROM (VALUES %s) AS d(assistent_id, location_id, calendar_month, calendar_year,
+                                   total_salary, taken_money, remaining_salary, debt, total_fine)
             WHERE t.assistent_id   = d.assistent_id
               AND t.location_id    = d.location_id
               AND t.calendar_month = d.calendar_month

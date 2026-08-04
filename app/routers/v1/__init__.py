@@ -23,6 +23,7 @@ from .management import (
     statistics, system_models, tags, users,
     telegram_bot,
     gennis_subjects, gennis_groups, gennis_students, gennis_leads, gennis_user_links,
+    gennis_location_subjects,
 )
 
 from .gennis import detail as gennis_detail
