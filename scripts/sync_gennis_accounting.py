@@ -315,8 +315,10 @@ def sync_deleted_staff_payments(gc, mc):
 
 # ── overhead ──────────────────────────────────────────────────────────────────
 
-def sync_overhead(gc, mc, since):
-    gc.execute("""
+def _overhead_query(gc, since=None):
+    where = "WHERE cd.date::date >= %s" if since else ""
+    params = (since,) if since else ()
+    gc.execute(f"""
         SELECT
             o.id,
             COALESCE(o.item_name, ot.name, 'Xarajat') AS item_name,
@@ -332,41 +334,75 @@ def sync_overhead(gc, mc, since):
         JOIN calendaryear  cy  ON cy.id  = o.calendar_year
         JOIN paymenttypes  pt  ON pt.id  = o.payment_type_id
         LEFT JOIN overheadtype ot ON ot.id = o.overhead_type_id
-        WHERE cd.date::date >= %s
+        {where}
         ORDER BY o.id
-    """, (since,))
+    """, params)
+    return gc.fetchall()
 
-    rows = gc.fetchall()
+
+def sync_overhead(gc, mc, since):
+    rows = _overhead_query(gc, since)
     if not rows:
         print("  Overhead:             0 records")
         return
+    execute_values(mc, """
+        INSERT INTO gennis_overhead
+            (gennis_id, item_name, item_sum, channel,
+             location_id, date, calendar_month, calendar_year, deleted)
+        VALUES %s
+        ON CONFLICT (gennis_id) WHERE gennis_id IS NOT NULL DO UPDATE SET
+            item_name      = EXCLUDED.item_name,
+            item_sum       = EXCLUDED.item_sum,
+            channel        = EXCLUDED.channel,
+            deleted        = false
+    """, [(r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7], False) for r in rows])
+    print(f"  Overhead:             {len(rows)} upserted (since {since})")
 
-    # Use INSERT WHERE NOT EXISTS to avoid duplicating management-created records.
-    # Match on (location_id, date, item_sum, channel) — good enough for dedup.
-    inserted = 0
-    for r in rows:
-        mc.execute("""
-            INSERT INTO gennis_overhead
-                (item_name, item_sum, overhead_type_id, channel,
-                 location_id, date, calendar_month, calendar_year, deleted)
-            SELECT %s, %s, NULL, %s, %s, %s, %s, %s, false
-            WHERE NOT EXISTS (
-                SELECT 1 FROM gennis_overhead
-                WHERE location_id=%s AND date=%s AND item_sum=%s AND channel=%s
-            )
-        """, (
-            r[1], r[2], r[3], r[4], r[5], r[6], r[7],
-            r[4], r[5], r[2], r[3],
-        ))
-        inserted += mc.rowcount
 
-    print(f"  Overhead:             {inserted} inserted (since {since})")
+def seed_overhead(gc, mc):
+    """Full re-seed of all overhead from gennis-old using gennis_id for dedup."""
+    rows = _overhead_query(gc)
+    if not rows:
+        print("  Overhead seed:        0 records")
+        return
+    execute_values(mc, """
+        INSERT INTO gennis_overhead
+            (gennis_id, item_name, item_sum, channel,
+             location_id, date, calendar_month, calendar_year, deleted)
+        VALUES %s
+        ON CONFLICT (gennis_id) WHERE gennis_id IS NOT NULL DO UPDATE SET
+            item_name      = EXCLUDED.item_name,
+            item_sum       = EXCLUDED.item_sum,
+            channel        = EXCLUDED.channel,
+            deleted        = false
+    """, [(r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7], False) for r in rows],
+    page_size=2000)
+    print(f"  Overhead seed:        {len(rows)} upserted")
+
+
+def sync_deleted_overhead(gc, mc):
+    """Mark overhead records deleted in gennis-old as deleted in mgmt-v2."""
+    gc.execute("SELECT id FROM overhead")
+    gennis_ids = {r[0] for r in gc.fetchall()}
+    mc.execute("SELECT gennis_id FROM gennis_overhead WHERE gennis_id IS NOT NULL AND deleted = false")
+    mgmt_ids = {r[0] for r in mc.fetchall()}
+    deleted_ids = list(mgmt_ids - gennis_ids)
+    if not deleted_ids:
+        print("  Overhead deletions:   0 marked")
+        return
+    mc.execute(
+        "UPDATE gennis_overhead SET deleted = true WHERE gennis_id = ANY(%s)",
+        (deleted_ids,)
+    )
+    print(f"  Overhead deletions:   {len(deleted_ids)} marked deleted")
 
 
 # ── capital expenditure ───────────────────────────────────────────────────────
 
-def sync_capital(gc, mc, since):
-    gc.execute("""
+def _capital_query(gc, since=None):
+    where = "WHERE cd.date::date >= %s" if since else ""
+    params = (since,) if since else ()
+    gc.execute(f"""
         SELECT
             ce.id,
             COALESCE(ce.item_name, 'Kapital') AS item_name,
@@ -381,33 +417,67 @@ def sync_capital(gc, mc, since):
         JOIN calendarmonth cm  ON cm.id  = ce.calendar_month
         JOIN calendaryear  cy  ON cy.id  = ce.calendar_year
         JOIN paymenttypes  pt  ON pt.id  = ce.payment_type_id
-        WHERE cd.date::date >= %s
+        {where}
         ORDER BY ce.id
-    """, (since,))
+    """, params)
+    return gc.fetchall()
 
-    rows = gc.fetchall()
+
+def sync_capital(gc, mc, since):
+    rows = _capital_query(gc, since)
     if not rows:
         print("  Capital expenditure:  0 records")
         return
+    execute_values(mc, """
+        INSERT INTO gennis_capital_expenditure
+            (gennis_id, item_name, item_sum, channel,
+             location_id, date, calendar_month, calendar_year, deleted)
+        VALUES %s
+        ON CONFLICT (gennis_id) WHERE gennis_id IS NOT NULL DO UPDATE SET
+            item_name = EXCLUDED.item_name,
+            item_sum  = EXCLUDED.item_sum,
+            channel   = EXCLUDED.channel,
+            deleted   = false
+    """, [(r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7], False) for r in rows])
+    print(f"  Capital expenditure:  {len(rows)} upserted (since {since})")
 
-    inserted = 0
-    for r in rows:
-        mc.execute("""
-            INSERT INTO gennis_capital_expenditure
-                (item_name, item_sum, channel,
-                 location_id, date, calendar_month, calendar_year, deleted)
-            SELECT %s, %s, %s, %s, %s, %s, %s, false
-            WHERE NOT EXISTS (
-                SELECT 1 FROM gennis_capital_expenditure
-                WHERE location_id=%s AND date=%s AND item_sum=%s AND channel=%s
-            )
-        """, (
-            r[1], r[2], r[3], r[4], r[5], r[6], r[7],
-            r[4], r[5], r[2], r[3],
-        ))
-        inserted += mc.rowcount
 
-    print(f"  Capital expenditure:  {inserted} inserted (since {since})")
+def seed_capital(gc, mc):
+    """Full re-seed of all capital_expenditure from gennis-old."""
+    rows = _capital_query(gc)
+    if not rows:
+        print("  Capital seed:         0 records")
+        return
+    execute_values(mc, """
+        INSERT INTO gennis_capital_expenditure
+            (gennis_id, item_name, item_sum, channel,
+             location_id, date, calendar_month, calendar_year, deleted)
+        VALUES %s
+        ON CONFLICT (gennis_id) WHERE gennis_id IS NOT NULL DO UPDATE SET
+            item_name = EXCLUDED.item_name,
+            item_sum  = EXCLUDED.item_sum,
+            channel   = EXCLUDED.channel,
+            deleted   = false
+    """, [(r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7], False) for r in rows],
+    page_size=2000)
+    print(f"  Capital seed:         {len(rows)} upserted")
+
+
+def sync_deleted_capital(gc, mc):
+    """Mark capital records deleted in gennis-old as deleted in mgmt-v2."""
+    gc.execute("SELECT id FROM capital_expenditure")
+    gennis_ids = {r[0] for r in gc.fetchall()}
+    mc.execute("SELECT gennis_id FROM gennis_capital_expenditure WHERE gennis_id IS NOT NULL AND deleted = false")
+    mgmt_ids = {r[0] for r in mc.fetchall()}
+    deleted_ids = list(mgmt_ids - gennis_ids)
+    if not deleted_ids:
+        print("  Capital deletions:    0 marked")
+        return
+    mc.execute(
+        "UPDATE gennis_capital_expenditure SET deleted = true WHERE gennis_id = ANY(%s)",
+        (deleted_ids,)
+    )
+    print(f"  Capital deletions:    {len(deleted_ids)} marked deleted")
 
 
 # ── salary total drift fix ────────────────────────────────────────────────────
@@ -814,6 +884,28 @@ def sync_charities(gc, mc):
     print(f"  Charities:            {len(rows)} upserted")
 
 
+def sync_deleted_charities(gc, mc):
+    """Mark charity records deleted in gennis-old as deleted in mgmt-v2."""
+    gc.execute("SELECT MAX(id) FROM studentcharity")
+    max_gennis_id = gc.fetchone()[0] or 0
+    gc.execute("SELECT id FROM studentcharity")
+    gennis_ids = {r[0] for r in gc.fetchall()}
+    mc.execute(
+        "SELECT id FROM gennis_student_charity WHERE id <= %s AND deleted = false",
+        (max_gennis_id,)
+    )
+    mgmt_ids = {r[0] for r in mc.fetchall()}
+    deleted_ids = list(mgmt_ids - gennis_ids)
+    if not deleted_ids:
+        print("  Charity deletions:    0 marked")
+        return
+    mc.execute(
+        "UPDATE gennis_student_charity SET deleted = true WHERE id = ANY(%s)",
+        (deleted_ids,)
+    )
+    print(f"  Charity deletions:    {len(deleted_ids)} marked deleted")
+
+
 # ── attendance history drift fix ───────────────────────────────────────────────
 
 def sync_attendance_history_drift(gc, mc, months=3):
@@ -973,6 +1065,8 @@ def main():
                 print("Seeding extra tables (full upsert)…")
                 seed_teacher_black_salaries(gc, mc)
                 seed_fine_reports(gc, mc)
+                seed_overhead(gc, mc)
+                seed_capital(gc, mc)
                 print()
 
             sync_student_payments(gc, mc, sp_since)
@@ -982,10 +1076,13 @@ def main():
             sync_staff_salary(gc, mc, ss_since)
             sync_deleted_staff_payments(gc, mc)
             sync_overhead(gc, mc, oh_since)
+            sync_deleted_overhead(gc, mc)
             sync_capital(gc, mc, cap_since)
+            sync_deleted_capital(gc, mc)
             sync_total_salary(gc, mc)
             sync_attendance_history_drift(gc, mc)
             sync_charities(gc, mc)
+            sync_deleted_charities(gc, mc)
 
             mgmt.commit()
             print("\nDone.")
