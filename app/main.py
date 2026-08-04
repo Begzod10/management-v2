@@ -33,7 +33,6 @@ from .routers.v1.management import (
     projects, sections, combined, telegram_bot, branch_loans,
     admin_requests, branch_transactions, overhead_type_logs,
     gennis_subjects, gennis_groups, gennis_students, gennis_leads, gennis_user_links,
-    gennis_location_subjects,
 )
 from .routers.v1.gennis import detail as gennis_detail
 from .routers.v1.turon import (
@@ -190,7 +189,6 @@ app.include_router(branch_transactions.router, prefix=V1)
 app.include_router(overhead_type_logs.router, prefix=V1)
 app.include_router(admin_requests.router, prefix=V1)
 app.include_router(gennis_subjects.router, prefix=V1)
-app.include_router(gennis_location_subjects.router, prefix=V1)
 app.include_router(gennis_groups.router, prefix=V1)
 app.include_router(gennis_students.router, prefix=V1)
 app.include_router(gennis_leads.router, prefix=V1)
