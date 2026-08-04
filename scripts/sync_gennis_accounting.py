@@ -535,6 +535,86 @@ def seed_assistent_salaries(gc, mc):
     print(f"  Assistent salary seed: {len(rows)} upserted")
 
 
+# ── student charities ─────────────────────────────────────────────────────────
+
+def sync_charities(gc, mc):
+    """Full UPSERT of all studentcharity → gennis_student_charity.
+
+    Safe to re-run — uses ON CONFLICT (id) DO UPDATE.
+    """
+    gc.execute("""
+        SELECT
+            sc.id,
+            sc.student_id,
+            sc.group_id,
+            sc.location_id,
+            COALESCE(sc.discount, 0)                 AS discount,
+            EXTRACT(MONTH FROM cm.date)::int         AS calendar_month,
+            EXTRACT(YEAR  FROM cy.date)::int         AS calendar_year
+        FROM studentcharity sc
+        JOIN calendarmonth cm ON cm.id = sc.calendar_month
+        JOIN calendaryear  cy ON cy.id = sc.calendar_year
+        ORDER BY sc.id
+    """)
+    rows = gc.fetchall()
+    if not rows:
+        print("  Charities:            0 records")
+        return
+    execute_values(mc, """
+        INSERT INTO gennis_student_charity
+            (id, student_id, group_id, location_id, discount,
+             calendar_month, calendar_year, deleted)
+        VALUES %s
+        ON CONFLICT (id) DO UPDATE SET
+            discount       = EXCLUDED.discount,
+            calendar_month = EXCLUDED.calendar_month,
+            calendar_year  = EXCLUDED.calendar_year,
+            group_id       = EXCLUDED.group_id
+    """, [(r[0], r[1], r[2], r[3], r[4], r[5], r[6], False) for r in rows])
+    mc.execute("SELECT setval('gennis_student_charity_id_seq', (SELECT MAX(id) FROM gennis_student_charity))")
+    print(f"  Charities:            {len(rows)} upserted")
+
+
+# ── attendance history drift fix ───────────────────────────────────────────────
+
+def sync_attendance_history_drift(gc, mc, months=3):
+    """Update attendance_history totals for the last N months from gennis-old.
+
+    Attendance records are recalculated monthly in gennis-old when attendance
+    is marked, so this keeps management-v2 in sync with recent changes.
+    """
+    gc.execute("""
+        SELECT
+            ahs.id,
+            COALESCE(ahs.total_debt, 0)     AS total_debt,
+            COALESCE(ahs.payment, 0)        AS payment,
+            COALESCE(ahs.remaining_debt, 0) AS remaining_debt,
+            COALESCE(ahs.total_discount, 0) AS total_discount,
+            COALESCE(ahs.status, false)     AS status
+        FROM attendancehistorystudent ahs
+        JOIN calendarmonth cm ON cm.id = ahs.calendar_month
+        JOIN calendaryear  cy ON cy.id = ahs.calendar_year
+        WHERE DATE_TRUNC('month', cm.date::date) >=
+              DATE_TRUNC('month', CURRENT_DATE) - (%s || ' months')::interval
+    """, (months,))
+    rows = gc.fetchall()
+    if not rows:
+        print(f"  Attendance drift fix: 0 rows")
+        return
+    execute_values(mc, """
+        UPDATE gennis_attendance_history_student AS t
+        SET total_debt     = d.total_debt,
+            payment        = d.payment,
+            remaining_debt = d.remaining_debt,
+            total_discount = d.total_discount,
+            status         = d.status,
+            synced_at      = NOW()
+        FROM (VALUES %s) AS d(id, total_debt, payment, remaining_debt, total_discount, status)
+        WHERE t.id = d.id
+    """, rows)
+    print(f"  Attendance drift fix: {len(rows)} rows updated (last {months} months)")
+
+
 # ── main ──────────────────────────────────────────────────────────────────────
 
 def seed_attendance_history(gc, mc):
@@ -651,6 +731,8 @@ def main():
             sync_overhead(gc, mc, oh_since)
             sync_capital(gc, mc, cap_since)
             sync_total_salary(gc, mc)
+            sync_attendance_history_drift(gc, mc)
+            sync_charities(gc, mc)
 
             mgmt.commit()
             print("\nDone.")
