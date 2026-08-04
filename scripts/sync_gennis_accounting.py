@@ -537,6 +537,59 @@ def seed_assistent_salaries(gc, mc):
 
 # ── main ──────────────────────────────────────────────────────────────────────
 
+def seed_attendance_history(gc, mc):
+    """Full UPSERT of all attendancehistorystudent → gennis_attendance_history_student.
+
+    Safe to re-run — uses ON CONFLICT (id) DO UPDATE.
+    """
+    gc.execute("""
+        SELECT
+            ahs.id,
+            ahs.student_id,
+            COALESCE(u.name || ' ' || u.surname, '') AS student_name,
+            ahs.group_id,
+            COALESCE(g.name, '')                     AS group_name,
+            ahs.subject_id,
+            COALESCE(ahs.total_debt, 0)              AS total_debt,
+            COALESCE(ahs.payment, 0)                 AS payment,
+            COALESCE(ahs.remaining_debt, 0)          AS remaining_debt,
+            COALESCE(ahs.total_discount, 0)          AS total_discount,
+            ahs.location_id,
+            EXTRACT(MONTH FROM cm.date)::int         AS calendar_month,
+            EXTRACT(YEAR  FROM cy.date)::int         AS calendar_year,
+            COALESCE(ahs.status, false)              AS status
+        FROM attendancehistorystudent ahs
+        JOIN calendarmonth cm ON cm.id = ahs.calendar_month
+        JOIN calendaryear  cy ON cy.id = ahs.calendar_year
+        LEFT JOIN students s  ON s.id  = ahs.student_id
+        LEFT JOIN users u     ON u.id  = s.user_id
+        LEFT JOIN groups g    ON g.id  = ahs.group_id
+        ORDER BY ahs.id
+    """)
+    rows = gc.fetchall()
+    if not rows:
+        print("  Attendance history seed: 0 records")
+        return
+    execute_values(mc, """
+        INSERT INTO gennis_attendance_history_student
+            (id, student_id, student_name, group_id, group_name, subject_id,
+             total_debt, payment, remaining_debt, total_discount,
+             location_id, calendar_month, calendar_year, status)
+        VALUES %s
+        ON CONFLICT (id) DO UPDATE SET
+            student_name   = EXCLUDED.student_name,
+            group_name     = EXCLUDED.group_name,
+            total_debt     = EXCLUDED.total_debt,
+            payment        = EXCLUDED.payment,
+            remaining_debt = EXCLUDED.remaining_debt,
+            total_discount = EXCLUDED.total_discount,
+            status         = EXCLUDED.status,
+            synced_at      = NOW()
+    """, rows, page_size=2000)
+    mc.execute("SELECT setval('gennis_attendance_history_student_id_seq', (SELECT MAX(id) FROM gennis_attendance_history_student))")
+    print(f"  Attendance history seed: {len(rows)} upserted")
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--since", type=date.fromisoformat,
@@ -545,6 +598,8 @@ def main():
                         help="Sync all records since 2026-01-01")
     parser.add_argument("--seed-salaries", action="store_true",
                         help="Full UPSERT of all teachersalary/asistent_salary → management-v2 (initial load)")
+    parser.add_argument("--seed-attendance", action="store_true",
+                        help="Full UPSERT of all attendancehistorystudent → management-v2 (initial load)")
     args = parser.parse_args()
 
     gennis = psycopg2.connect(GENNIS_DSN)
@@ -582,6 +637,11 @@ def main():
                 print("Seeding salary totals (full upsert)…")
                 seed_teacher_salaries(gc, mc)
                 seed_assistent_salaries(gc, mc)
+                print()
+
+            if args.seed_attendance:
+                print("Seeding attendance history (full upsert)…")
+                seed_attendance_history(gc, mc)
                 print()
 
             sync_student_payments(gc, mc, sp_since)
