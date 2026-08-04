@@ -99,6 +99,35 @@ def sync_student_payments(gc, mc, since):
     print(f"  Student payments:     {len(rows)} upserted (since {since})")
 
 
+def sync_deleted_student_payments(gc, mc):
+    """Mark records as deleted=true in management-v2 when hard-deleted from gennis-old.
+
+    Only checks IDs in the gennis-old sequence range (not native management-v2 records).
+    """
+    gc.execute("SELECT MAX(id) FROM studentpayments")
+    max_gennis_id = gc.fetchone()[0] or 0
+
+    gc.execute("SELECT id FROM studentpayments")
+    gennis_ids = {r[0] for r in gc.fetchall()}
+
+    mc.execute(
+        "SELECT id FROM gennis_student_payment WHERE id <= %s AND deleted = false",
+        (max_gennis_id,)
+    )
+    mgmt_ids = {r[0] for r in mc.fetchall()}
+
+    deleted_ids = list(mgmt_ids - gennis_ids)
+    if not deleted_ids:
+        print("  Payment deletions:    0 marked")
+        return
+
+    mc.execute(
+        "UPDATE gennis_student_payment SET deleted = true, synced_at = NOW() WHERE id = ANY(%s)",
+        (deleted_ids,)
+    )
+    print(f"  Payment deletions:    {len(deleted_ids)} marked deleted")
+
+
 # ── teacher salary payments ───────────────────────────────────────────────────
 
 def sync_teacher_salary(gc, mc, since):
@@ -256,6 +285,32 @@ def sync_staff_salary(gc, mc, since):
 
     reset_sequence(mc, "gennis_staff_salary_payment", "gennis_staff_salary_payment_id_seq")
     print(f"  Staff salary:         {len(rows)} upserted (since {since})")
+
+
+def sync_deleted_staff_payments(gc, mc):
+    """Mark staff salary payments deleted=true in management-v2 when hard-deleted from gennis-old."""
+    gc.execute("SELECT MAX(id) FROM staffsalaries")
+    max_gennis_id = gc.fetchone()[0] or 0
+
+    gc.execute("SELECT id FROM staffsalaries")
+    gennis_ids = {r[0] for r in gc.fetchall()}
+
+    mc.execute(
+        "SELECT id FROM gennis_staff_salary_payment WHERE id <= %s AND deleted = false",
+        (max_gennis_id,)
+    )
+    mgmt_ids = {r[0] for r in mc.fetchall()}
+
+    deleted_ids = list(mgmt_ids - gennis_ids)
+    if not deleted_ids:
+        print("  Staff deletions:      0 marked")
+        return
+
+    mc.execute(
+        "UPDATE gennis_staff_salary_payment SET deleted = true, synced_at = NOW() WHERE id = ANY(%s)",
+        (deleted_ids,)
+    )
+    print(f"  Staff deletions:      {len(deleted_ids)} marked deleted")
 
 
 # ── overhead ──────────────────────────────────────────────────────────────────
@@ -725,9 +780,11 @@ def main():
                 print()
 
             sync_student_payments(gc, mc, sp_since)
+            sync_deleted_student_payments(gc, mc)
             sync_teacher_salary(gc, mc, ts_since)
             sync_assistent_salary(gc, mc, as_since)
             sync_staff_salary(gc, mc, ss_since)
+            sync_deleted_staff_payments(gc, mc)
             sync_overhead(gc, mc, oh_since)
             sync_capital(gc, mc, cap_since)
             sync_total_salary(gc, mc)
