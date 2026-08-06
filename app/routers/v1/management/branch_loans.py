@@ -158,11 +158,11 @@ def _validate_target(payload: BranchLoanCreate) -> None:
 
 @router.get("", response_model=List[BranchLoanOut])
 def list_loans(
-    source: Optional[str] = Query(None, regex="^(gennis|turon)$"),
+    source: Optional[str] = Query(None, pattern="^(gennis|turon)$"),
     location_id: Optional[int] = Query(None),
     branch_id: Optional[int] = Query(None),
-    status: Optional[str] = Query(None, regex="^(active|settled|cancelled)$"),
-    direction: Optional[str] = Query(None, regex="^(out|in)$"),
+    status: Optional[str] = Query(None, pattern="^(active|settled|cancelled)$"),
+    direction: Optional[str] = Query(None, pattern="^(out|in)$"),
     counterparty_user_id: Optional[int] = None,
     db: Session = Depends(get_db),
 ):

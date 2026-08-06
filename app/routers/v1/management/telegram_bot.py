@@ -76,16 +76,16 @@ class TelegramWebhookBody(BaseModel):
         }
     }}
 
-    update_id: int = Field(..., example=123456789)
+    update_id: int = Field(..., examples=[123456789])
     message: dict = Field(
         default={},
-        example={
+        examples=[{
             "message_id": 42,
             "from": {"id": 987654321, "first_name": "Jasur"},
             "chat": {"id": 987654321, "type": "private"},
             "date": 1712534400,
             "text": "/start aB3xK9mZ",
-        },
+        }],
     )
 
 
@@ -107,7 +107,7 @@ async def telegram_webhook(
     body: TelegramWebhookBody,
     x_telegram_bot_api_secret_token: str = Header(
         None,
-        example="gennis_office_bot_secret_1001",
+        examples=["gennis_office_bot_secret_1001"],
         description="Must match TELEGRAM_WEBHOOK_SECRET env var",
     ),
     db: Session = Depends(get_db),
