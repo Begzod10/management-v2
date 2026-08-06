@@ -16,7 +16,12 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column('gennis_group', sa.Column('attendance_days', sa.Integer(), nullable=True))
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+    existing = {c["name"] for c in inspector.get_columns("gennis_group")}
+
+    if "attendance_days" not in existing:
+        op.add_column('gennis_group', sa.Column('attendance_days', sa.Integer(), nullable=True))
 
 
 def downgrade() -> None:

@@ -15,8 +15,14 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.add_column('gennis_group', sa.Column('teacher_salary', sa.Integer(), nullable=True))
-    op.add_column('gennis_group', sa.Column('assistent_salary', sa.Integer(), nullable=True))
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+    existing = {c["name"] for c in inspector.get_columns("gennis_group")}
+
+    if "teacher_salary" not in existing:
+        op.add_column('gennis_group', sa.Column('teacher_salary', sa.Integer(), nullable=True))
+    if "assistent_salary" not in existing:
+        op.add_column('gennis_group', sa.Column('assistent_salary', sa.Integer(), nullable=True))
 
 
 def downgrade() -> None:
