@@ -1,6 +1,6 @@
 """add accounting extended tables: account_report, account payable, fine_report, capital_term, charity, book_payment, black_salary_entry
 
-Revision ID: b1c2d3e4f5a6
+Revision ID: b1c2d3e4f6a7
 Revises: a9b8c7d6e5f4
 Create Date: 2026-06-29 10:00:00.000000
 
@@ -9,7 +9,7 @@ from typing import Sequence, Union
 from alembic import op
 import sqlalchemy as sa
 
-revision: str = 'b1c2d3e4f5a6'
+revision: str = 'b1c2d3e4f6a7'
 down_revision: Union[str, None] = 'a9b8c7d6e5f4'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None

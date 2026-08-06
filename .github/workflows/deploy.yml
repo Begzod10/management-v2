@@ -43,7 +43,7 @@ jobs:
               sleep 5
             done
 
-            docker compose exec -T app alembic -c alembic_v2.ini upgrade head
+            docker compose exec -T app alembic -c alembic_v2.ini upgrade heads
             docker image prune -f
 
       # ── Muvaffaqiyatsiz bo'lsa: logni Telegraph'ga yuklaydi ─────────────────
