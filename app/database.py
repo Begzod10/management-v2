@@ -5,9 +5,25 @@ import os
 
 load_dotenv()
 
-DATABASE_URL = os.getenv("DATABASE_URL")
-GENNIS_DB_URL = os.getenv("GENNIS_DB_URL")
-TURON_DB_URL = os.getenv("TURON_DB_URL")
+def _required(name: str) -> str:
+    """Fail at import with a readable message rather than deep inside SQLAlchemy.
+
+    A missing URL used to reach create_engine(None) and raise an opaque
+    TypeError. Worse, anything carrying a hardcoded fallback would connect to
+    the wrong database and write there silently.
+    """
+    value = os.getenv(name)
+    if not value:
+        raise RuntimeError(
+            f"{name} is not set. Configure it in .env — there is no default, "
+            f"because guessing a database URL risks writing to the wrong one."
+        )
+    return value
+
+
+DATABASE_URL = _required("DATABASE_URL")
+GENNIS_DB_URL = _required("GENNIS_DB_URL")
+TURON_DB_URL = _required("TURON_DB_URL")
 
 # Management DB (read/write)
 engine = create_engine(DATABASE_URL)

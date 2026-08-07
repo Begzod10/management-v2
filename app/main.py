@@ -8,7 +8,7 @@ from fastapi.responses import HTMLResponse
 from jose import jwt, JWTError
 from sqlalchemy import text
 from .config import settings
-from .database import engine, gennis_write_engine, turon_write_engine, SessionLocal
+from .database import gennis_write_engine, turon_write_engine, SessionLocal
 from .models import ApiLog
 
 _log = logging.getLogger(__name__)
@@ -52,9 +52,17 @@ from .mobile import (
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Create all management DB tables (api_log, users, etc.) if not exist
-    from .models import Base
-    Base.metadata.create_all(bind=engine, checkfirst=True)
+    # The management DB schema is owned by alembic_v2 — do NOT create_all here.
+    #
+    # This used to run Base.metadata.create_all(bind=engine, checkfirst=True) on
+    # every boot. Because the deploy script starts the app before running
+    # `alembic upgrade`, the ORM had already made every table and column the
+    # migrations were about to add, so migrations then failed with
+    # DuplicateTable/DuplicateColumn — while `continue-on-error` on the deploy
+    # step hid it. It also created tables in whatever database DATABASE_URL
+    # happened to point at, without touching alembic_version.
+    #
+    # Schema changes go in alembic_v2/versions/ and nowhere else.
 
     # Create management_dividend/investment tables in external DBs if not exist
     GennisDividend.__table__.create(bind=gennis_write_engine, checkfirst=True)
