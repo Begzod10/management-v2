@@ -683,7 +683,11 @@ class GennisLead(Base):
     id            = Column(BigInteger, primary_key=True, index=True)
     gennis_id     = Column(Integer, nullable=False, unique=True)
     name          = Column(String(255), nullable=True)
-    phone         = Column(String(50), nullable=True)
+    # 100, not 50: old gennis puts no length limit on lead.phone and has values
+    # up to 52 chars. One such row blocked all 14 pending leads from syncing —
+    # psycopg2's execute_batch sends a batch as a single statement, so one
+    # over-length value fails the whole table.
+    phone         = Column(String(100), nullable=True)
     location_id   = Column(Integer, nullable=True)
     location_name = Column(String(100), nullable=True)
     comment       = Column(Text, nullable=True)
