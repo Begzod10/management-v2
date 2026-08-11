@@ -761,6 +761,280 @@ class GennisCalendarDay(Base):
     synced_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
 
+class GennisStudentExcuse(Base):
+    """Absence notes. Mirror of old gennis `studentexcuses` (migration w4x5y6z7a8b9).
+
+    This and the twelve mirrors below cover the features old gennis had and v2
+    never did. They are archives of a system being switched off, so they hold
+    the old row's id in `gennis_id` and reference other old rows raw, in
+    `*_gennis_id` columns, rather than remapping to v2 surrogate keys — a remap
+    would silently drop any row whose target was never migrated, losing exactly
+    the history these tables exist to keep.
+    """
+
+    __tablename__ = "gennis_student_excuse"
+
+    id                = Column(BigInteger, primary_key=True, index=True)
+    gennis_id         = Column(Integer, nullable=False, unique=True)
+    student_gennis_id = Column(Integer, nullable=True, index=True)
+    reason            = Column(Text, nullable=True)
+    to_date           = Column(DateTime, nullable=True)
+    added_date        = Column(DateTime, nullable=True)
+    audio_url         = Column(String(500), nullable=True)
+    synced_at         = Column(DateTime, server_default=func.now())
+
+
+class GennisStudentExcuseAudio(Base):
+    __tablename__ = "gennis_student_excuse_audio"
+
+    id                     = Column(BigInteger, primary_key=True, index=True)
+    gennis_id              = Column(Integer, nullable=False, unique=True)
+    excuse_gennis_id       = Column(Integer, nullable=True, index=True)
+    audio_url              = Column(String(500), nullable=True)
+    client_number          = Column(String(100), nullable=True)
+    diversion              = Column(String(100), nullable=True)
+    duration               = Column(String(50), nullable=True)
+    start_time             = Column(DateTime, nullable=True)
+    end_time               = Column(DateTime, nullable=True)
+    wait_time              = Column(String(50), nullable=True)
+    comment                = Column(Text, nullable=True)
+    calendar_day_gennis_id = Column(Integer, nullable=True)
+    date                   = Column(Date, nullable=True)
+    synced_at              = Column(DateTime, server_default=func.now())
+
+
+class GennisGroupTest(Base):
+    __tablename__ = "gennis_group_test"
+
+    id                       = Column(BigInteger, primary_key=True, index=True)
+    gennis_id                = Column(Integer, nullable=False, unique=True)
+    group_gennis_id          = Column(Integer, nullable=True, index=True)
+    subject_gennis_id        = Column(Integer, nullable=True)
+    name                     = Column(String(255), nullable=True)
+    number_tests             = Column(Integer, nullable=True)
+    percentage               = Column(Float, nullable=True)
+    level                    = Column(String(100), nullable=True)
+    file                     = Column(String(500), nullable=True)
+    calendar_day_gennis_id   = Column(Integer, nullable=True)
+    calendar_month_gennis_id = Column(Integer, nullable=True)
+    calendar_year_gennis_id  = Column(Integer, nullable=True)
+    date                     = Column(Date, nullable=True, index=True)
+    year                     = Column(Integer, nullable=True)
+    month                    = Column(Integer, nullable=True)
+    synced_at                = Column(DateTime, server_default=func.now())
+
+
+class GennisStudentTest(Base):
+    __tablename__ = "gennis_student_test"
+
+    id                     = Column(BigInteger, primary_key=True, index=True)
+    gennis_id              = Column(Integer, nullable=False, unique=True)
+    student_gennis_id      = Column(Integer, nullable=True, index=True)
+    group_test_gennis_id   = Column(Integer, nullable=True, index=True)
+    group_gennis_id        = Column(Integer, nullable=True)
+    subject_gennis_id      = Column(Integer, nullable=True)
+    true_answers           = Column(Integer, nullable=True)
+    # text in old gennis, unlike gennis_group_test.percentage which is a float
+    percentage             = Column(String(50), nullable=True)
+    calendar_day_gennis_id = Column(Integer, nullable=True)
+    date                   = Column(Date, nullable=True, index=True)
+    synced_at              = Column(DateTime, server_default=func.now())
+
+
+class GennisTestApplicant(Base):
+    """Public entrance-test sign-ups. Old gennis called this `student_test_block`,
+    but it holds applicants (name, phone, school, language), not test results."""
+
+    __tablename__ = "gennis_test_applicant"
+
+    id            = Column(BigInteger, primary_key=True, index=True)
+    gennis_id     = Column(Integer, nullable=False, unique=True)
+    name          = Column(String(255), nullable=True)
+    surname       = Column(String(255), nullable=True)
+    father_name   = Column(String(255), nullable=True)
+    phone         = Column(String(50), nullable=True)
+    school_id     = Column(Integer, nullable=True)
+    defenation_id = Column(Integer, nullable=True)
+    unique_id     = Column(String(100), nullable=True)
+    location_id   = Column(Integer, nullable=True)
+    language      = Column(String(50), nullable=True)
+    synced_at     = Column(DateTime, server_default=func.now())
+
+
+class GennisBlackStudent(Base):
+    """Debtor students. `black` is old gennis's term, kept for traceability."""
+
+    __tablename__ = "gennis_black_student"
+
+    id                       = Column(BigInteger, primary_key=True, index=True)
+    gennis_id                = Column(Integer, nullable=False, unique=True)
+    student_gennis_id        = Column(Integer, nullable=True, index=True)
+    user_gennis_id           = Column(Integer, nullable=True)
+    location_id              = Column(Integer, nullable=True, index=True)
+    comment                  = Column(Text, nullable=True)
+    deleted                  = Column(Boolean, nullable=False, default=False)
+    calendar_day_gennis_id   = Column(Integer, nullable=True)
+    calendar_month_gennis_id = Column(Integer, nullable=True)
+    calendar_year_gennis_id  = Column(Integer, nullable=True)
+    date                     = Column(Date, nullable=True, index=True)
+    year                     = Column(Integer, nullable=True)
+    month                    = Column(Integer, nullable=True)
+    synced_at                = Column(DateTime, server_default=func.now())
+
+
+class GennisBlackStudentStat(Base):
+    __tablename__ = "gennis_black_student_stat"
+
+    id                       = Column(BigInteger, primary_key=True, index=True)
+    gennis_id                = Column(Integer, nullable=False, unique=True)
+    location_id              = Column(Integer, nullable=True, index=True)
+    total_black_students     = Column(Integer, nullable=True)
+    calendar_month_gennis_id = Column(Integer, nullable=True)
+    calendar_year_gennis_id  = Column(Integer, nullable=True)
+    year                     = Column(Integer, nullable=True)
+    month                    = Column(Integer, nullable=True)
+    synced_at                = Column(DateTime, server_default=func.now())
+
+
+class GennisBranchReport(Base):
+    """Daily per-branch rollup (headcounts and payment totals)."""
+
+    __tablename__ = "gennis_branch_report"
+
+    id                              = Column(BigInteger, primary_key=True, index=True)
+    gennis_id                       = Column(Integer, nullable=False, unique=True)
+    location_id                     = Column(Integer, nullable=True, index=True)
+    number_of_students              = Column(Integer, nullable=True)
+    number_of_deleted_students      = Column(Integer, nullable=True)
+    number_of_deleted_registrations = Column(Integer, nullable=True)
+    number_of_teachers              = Column(Integer, nullable=True)
+    number_of_staff                 = Column(Integer, nullable=True)
+    number_of_groups                = Column(Integer, nullable=True)
+    number_of_deleted_groups        = Column(Integer, nullable=True)
+    number_of_payments              = Column(Integer, nullable=True)
+    sum_of_payments                 = Column(BigInteger, nullable=True)
+    calendar_day_gennis_id          = Column(Integer, nullable=True)
+    calendar_month_gennis_id        = Column(Integer, nullable=True)
+    calendar_year_gennis_id         = Column(Integer, nullable=True)
+    date                            = Column(Date, nullable=True, index=True)
+    year                            = Column(Integer, nullable=True)
+    month                           = Column(Integer, nullable=True)
+    created_at                      = Column(DateTime, nullable=True)
+    updated_at                      = Column(DateTime, nullable=True)
+    synced_at                       = Column(DateTime, server_default=func.now())
+
+
+class GennisDeletedStudentPayment(Base):
+    """Reversed student payments — the audit trail for money taken back."""
+
+    __tablename__ = "gennis_deleted_student_payment"
+
+    id                       = Column(BigInteger, primary_key=True, index=True)
+    gennis_id                = Column(Integer, nullable=False, unique=True)
+    student_gennis_id        = Column(Integer, nullable=True, index=True)
+    location_id              = Column(Integer, nullable=True, index=True)
+    payment_sum              = Column(BigInteger, nullable=True)
+    payment_type_id          = Column(Integer, nullable=True)
+    account_period_id        = Column(Integer, nullable=True)
+    payment                  = Column(Boolean, nullable=True)
+    deleted_date             = Column(DateTime, nullable=True)
+    reason                   = Column(Text, nullable=True)
+    calendar_day_gennis_id   = Column(Integer, nullable=True)
+    calendar_month_gennis_id = Column(Integer, nullable=True)
+    calendar_year_gennis_id  = Column(Integer, nullable=True)
+    date                     = Column(Date, nullable=True, index=True)
+    year                     = Column(Integer, nullable=True)
+    month                    = Column(Integer, nullable=True)
+    synced_at                = Column(DateTime, server_default=func.now())
+
+
+class GennisContractStudent(Base):
+    __tablename__ = "gennis_contract_student"
+
+    id                = Column(BigInteger, primary_key=True, index=True)
+    gennis_id         = Column(Integer, nullable=False, unique=True)
+    student_gennis_id = Column(Integer, nullable=True, index=True)
+    created_date      = Column(DateTime, nullable=True)
+    expire_date       = Column(DateTime, nullable=True)
+    given_place       = Column(String(255), nullable=True)
+    given_time        = Column(String(100), nullable=True)
+    place             = Column(String(255), nullable=True)
+    father_name       = Column(String(255), nullable=True)
+    passport_series   = Column(String(50), nullable=True)
+    synced_at         = Column(DateTime, server_default=func.now())
+
+
+class GennisContractCounter(Base):
+    """Per-branch contract numbering (old `contract_students_data`)."""
+
+    __tablename__ = "gennis_contract_counter"
+
+    id          = Column(BigInteger, primary_key=True, index=True)
+    gennis_id   = Column(Integer, nullable=False, unique=True)
+    year        = Column(DateTime, nullable=True)
+    number      = Column(Integer, nullable=True)
+    location_id = Column(Integer, nullable=True)
+    synced_at   = Column(DateTime, server_default=func.now())
+
+
+class GennisStudentCallingInfo(Base):
+    __tablename__ = "gennis_student_calling_info"
+
+    id                = Column(BigInteger, primary_key=True, index=True)
+    gennis_id         = Column(Integer, nullable=False, unique=True)
+    student_gennis_id = Column(Integer, nullable=True, index=True)
+    comment           = Column(Text, nullable=True)
+    day               = Column(DateTime, nullable=True)
+    date              = Column(DateTime, nullable=True)
+    audio_url         = Column(String(500), nullable=True)
+    synced_at         = Column(DateTime, server_default=func.now())
+
+
+class GennisStudentCallingInfoAudio(Base):
+    __tablename__ = "gennis_student_calling_info_audio"
+
+    id                     = Column(BigInteger, primary_key=True, index=True)
+    gennis_id              = Column(Integer, nullable=False, unique=True)
+    calling_info_gennis_id = Column(Integer, nullable=True, index=True)
+    audio_url              = Column(String(500), nullable=True)
+    client_number          = Column(String(100), nullable=True)
+    diversion              = Column(String(100), nullable=True)
+    duration               = Column(String(50), nullable=True)
+    start_time             = Column(DateTime, nullable=True)
+    end_time               = Column(DateTime, nullable=True)
+    wait_time              = Column(String(50), nullable=True)
+    comment                = Column(Text, nullable=True)
+    calendar_day_gennis_id = Column(Integer, nullable=True)
+    date                   = Column(Date, nullable=True)
+    synced_at              = Column(DateTime, server_default=func.now())
+
+
+class GennisNotification(Base):
+    """Old task notifications, mirrored rather than merged into `notification`.
+
+    Old mission ids run 11..50 while v2's mission table holds {4,5,7,8,15}: the
+    single overlap is a different mission, so reusing the ids would attach old
+    notifications to unrelated v2 tasks, and merging them with a null mission
+    would still show real users unread "you have been assigned a task" messages
+    for tasks that do not exist here. Both the old user id and its resolved v2
+    counterpart are kept so the archive stays joinable either way.
+    """
+
+    __tablename__ = "gennis_notification"
+
+    id                 = Column(BigInteger, primary_key=True, index=True)
+    gennis_id          = Column(Integer, nullable=False, unique=True)
+    user_gennis_id     = Column(Integer, nullable=True, index=True)
+    management_user_id = Column(BigInteger, nullable=True)
+    mission_gennis_id  = Column(Integer, nullable=True)
+    message            = Column(Text, nullable=True)
+    role               = Column(String(50), nullable=True)
+    deadline           = Column(Date, nullable=True)
+    is_read            = Column(Boolean, nullable=True)
+    created_at         = Column(DateTime, nullable=True)
+    synced_at          = Column(DateTime, server_default=func.now())
+
+
 class GennisUserSync(Base):
     __tablename__ = "gennis_user"
 
