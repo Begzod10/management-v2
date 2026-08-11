@@ -1223,6 +1223,370 @@ class GennisDeletedStaffSalary(Base):
     synced_at                = Column(DateTime, server_default=func.now())
 
 
+class GennisSchool(Base):
+    """Schools referenced by gennis_test_applicant.school_id — all 1,359
+    applicants carry one, across 17 distinct schools."""
+
+    __tablename__ = "gennis_school"
+
+    id        = Column(BigInteger, primary_key=True, index=True)
+    gennis_id = Column(Integer, nullable=False, unique=True)
+    name      = Column(String(255), nullable=True)
+    number    = Column(Integer, nullable=True)
+    synced_at = Column(DateTime, server_default=func.now())
+
+
+class GennisBook(Base):
+    __tablename__ = "gennis_book"
+
+    id          = Column(BigInteger, primary_key=True, index=True)
+    gennis_id   = Column(Integer, nullable=False, unique=True)
+    name        = Column(String(255), nullable=True)
+    # old gennis called this "desc", which is reserved in SQL
+    description = Column(Text, nullable=True)
+    img         = Column(String(500), nullable=True)
+    img2        = Column(String(500), nullable=True)
+    img3        = Column(String(500), nullable=True)
+    own_price   = Column(BigInteger, nullable=True)
+    share_price = Column(BigInteger, nullable=True)
+    price       = Column(BigInteger, nullable=True)
+    synced_at   = Column(DateTime, server_default=func.now())
+
+
+class GennisBookOrder(Base):
+    """Book orders. v2 already held the 162 book payments but not the orders."""
+
+    __tablename__ = "gennis_book_order"
+
+    id                           = Column(BigInteger, primary_key=True, index=True)
+    gennis_id                    = Column(Integer, nullable=False, unique=True)
+    student_gennis_id            = Column(Integer, nullable=True, index=True)
+    group_gennis_id              = Column(Integer, nullable=True)
+    teacher_gennis_id            = Column(Integer, nullable=True)
+    book_gennis_id               = Column(Integer, nullable=True, index=True)
+    user_gennis_id               = Column(Integer, nullable=True)
+    location_id                  = Column(Integer, nullable=True, index=True)
+    count                        = Column(Integer, nullable=True)
+    accounting_period_id         = Column(Integer, nullable=True)
+    editor_confirm               = Column(Boolean, nullable=True)
+    admin_confirm                = Column(Boolean, nullable=True)
+    collected_payments_gennis_id = Column(Integer, nullable=True)
+    deleted                      = Column(Boolean, nullable=True)
+    reason                       = Column(Text, nullable=True)
+    calendar_day_gennis_id       = Column(Integer, nullable=True)
+    date                         = Column(Date, nullable=True, index=True)
+    synced_at                    = Column(DateTime, server_default=func.now())
+
+
+class GennisUserBook(Base):
+    __tablename__ = "gennis_user_book"
+
+    id                       = Column(BigInteger, primary_key=True, index=True)
+    gennis_id                = Column(Integer, nullable=False, unique=True)
+    user_gennis_id           = Column(Integer, nullable=True, index=True)
+    location_id              = Column(Integer, nullable=True)
+    payment_sum              = Column(BigInteger, nullable=True)
+    book_order_gennis_id     = Column(Integer, nullable=True)
+    account_period_id        = Column(Integer, nullable=True)
+    salary_location_id       = Column(Integer, nullable=True)
+    salary_id                = Column(Integer, nullable=True)
+    calendar_day_gennis_id   = Column(Integer, nullable=True)
+    calendar_month_gennis_id = Column(Integer, nullable=True)
+    calendar_year_gennis_id  = Column(Integer, nullable=True)
+    date                     = Column(Date, nullable=True, index=True)
+    year                     = Column(Integer, nullable=True)
+    month                    = Column(Integer, nullable=True)
+    synced_at                = Column(DateTime, server_default=func.now())
+
+
+class GennisCollectedBookPayment(Base):
+    """created_date and received_date are named like dates in old gennis but
+    hold calendarday ids; both the raw id and the resolved date are kept."""
+
+    __tablename__ = "gennis_collected_book_payment"
+
+    id                       = Column(BigInteger, primary_key=True, index=True)
+    gennis_id                = Column(Integer, nullable=False, unique=True)
+    debt                     = Column(BigInteger, nullable=True)
+    location_id              = Column(Integer, nullable=True, index=True)
+    status                   = Column(Boolean, nullable=True)
+    account_period_id        = Column(Integer, nullable=True)
+    payment_type_id          = Column(Integer, nullable=True)
+    created_day_gennis_id    = Column(Integer, nullable=True)
+    received_day_gennis_id   = Column(Integer, nullable=True)
+    created_date             = Column(Date, nullable=True)
+    received_date            = Column(Date, nullable=True)
+    calendar_month_gennis_id = Column(Integer, nullable=True)
+    calendar_year_gennis_id  = Column(Integer, nullable=True)
+    year                     = Column(Integer, nullable=True)
+    month                    = Column(Integer, nullable=True)
+    synced_at                = Column(DateTime, server_default=func.now())
+
+
+class GennisBranchPayment(Base):
+    __tablename__ = "gennis_branch_payment"
+
+    id                       = Column(BigInteger, primary_key=True, index=True)
+    gennis_id                = Column(Integer, nullable=False, unique=True)
+    location_id              = Column(Integer, nullable=True, index=True)
+    payment_type_id          = Column(Integer, nullable=True)
+    editor_balance_id        = Column(Integer, nullable=True)
+    book_order_gennis_id     = Column(Integer, nullable=True)
+    payment_sum              = Column(BigInteger, nullable=True)
+    account_period_id        = Column(Integer, nullable=True)
+    calendar_day_gennis_id   = Column(Integer, nullable=True)
+    calendar_month_gennis_id = Column(Integer, nullable=True)
+    calendar_year_gennis_id  = Column(Integer, nullable=True)
+    date                     = Column(Date, nullable=True, index=True)
+    year                     = Column(Integer, nullable=True)
+    month                    = Column(Integer, nullable=True)
+    synced_at                = Column(DateTime, server_default=func.now())
+
+
+class GennisMission(Base):
+    """Old gennis missions, mirrored rather than loaded into the live `mission`
+    table. That table's gennis_executor_id columns exist so management-v2 can
+    assign its own missions to gennis users — it has turon_executor_id too —
+    not to receive imported ones. Loading these would put old missions into real
+    users' lists; 3 of 11 also have a NULL creator_id, which is NOT NULL there,
+    and old id 15 collides with an existing v2 mission."""
+
+    __tablename__ = "gennis_mission"
+
+    id                          = Column(BigInteger, primary_key=True, index=True)
+    gennis_id                   = Column(Integer, nullable=False, unique=True)
+    title                       = Column(String(500), nullable=True)
+    description                 = Column(Text, nullable=True)
+    category                    = Column(String(100), nullable=True)
+    creator_gennis_id           = Column(Integer, nullable=True)
+    executor_gennis_id          = Column(Integer, nullable=True, index=True)
+    reviewer_gennis_id          = Column(Integer, nullable=True)
+    original_executor_gennis_id = Column(Integer, nullable=True)
+    redirected_by_gennis_id     = Column(Integer, nullable=True)
+    is_redirected               = Column(Boolean, nullable=True)
+    redirected_at               = Column(DateTime, nullable=True)
+    location_id                 = Column(Integer, nullable=True, index=True)
+    start_datetime              = Column(DateTime, nullable=True)
+    deadline_datetime           = Column(DateTime, nullable=True)
+    finish_datetime             = Column(DateTime, nullable=True)
+    status                      = Column(String(50), nullable=True)
+    kpi_weight                  = Column(Integer, nullable=True)
+    penalty_per_day             = Column(Integer, nullable=True)
+    early_bonus_per_day         = Column(Integer, nullable=True)
+    max_bonus                   = Column(Integer, nullable=True)
+    max_penalty                 = Column(Integer, nullable=True)
+    delay_days                  = Column(Integer, nullable=True)
+    is_recurring                = Column(Boolean, nullable=True)
+    recurring_type              = Column(String(50), nullable=True)
+    repeat_every                = Column(Integer, nullable=True)
+    last_generated              = Column(Date, nullable=True)
+    final_sc                    = Column(Integer, nullable=True)
+    management_id               = Column(BigInteger, nullable=True)
+    creator_name                = Column(String(255), nullable=True)
+    reviewer_name               = Column(String(255), nullable=True)
+    deleted                     = Column(Boolean, nullable=True)
+    created_at                  = Column(DateTime, nullable=True)
+    updated_at                  = Column(DateTime, nullable=True)
+    synced_at                   = Column(DateTime, server_default=func.now())
+
+
+class GennisMissionHistory(Base):
+    __tablename__ = "gennis_mission_history"
+
+    id                       = Column(BigInteger, primary_key=True, index=True)
+    gennis_id                = Column(Integer, nullable=False, unique=True)
+    mission_gennis_id        = Column(Integer, nullable=True, index=True)
+    executor_gennis_id       = Column(Integer, nullable=True)
+    reviewer_gennis_id       = Column(Integer, nullable=True)
+    management_id            = Column(BigInteger, nullable=True)
+    management_executor_id   = Column(BigInteger, nullable=True)
+    management_executor_name = Column(String(255), nullable=True)
+    management_reviewer_id   = Column(BigInteger, nullable=True)
+    management_reviewer_name = Column(String(255), nullable=True)
+    turon_executor_id        = Column(BigInteger, nullable=True)
+    turon_executor_name      = Column(String(255), nullable=True)
+    turon_reviewer_id        = Column(BigInteger, nullable=True)
+    turon_reviewer_name      = Column(String(255), nullable=True)
+    changed_by_name          = Column(String(255), nullable=True)
+    note                     = Column(Text, nullable=True)
+    created_at               = Column(DateTime, nullable=True)
+    synced_at                = Column(DateTime, server_default=func.now())
+
+
+class GennisMissionComment(Base):
+    __tablename__ = "gennis_mission_comment"
+
+    id                = Column(BigInteger, primary_key=True, index=True)
+    gennis_id         = Column(Integer, nullable=False, unique=True)
+    mission_gennis_id = Column(Integer, nullable=True, index=True)
+    user_gennis_id    = Column(Integer, nullable=True)
+    text              = Column(Text, nullable=True)
+    attachment_path   = Column(String(500), nullable=True)
+    management_id     = Column(BigInteger, nullable=True)
+    creator_name      = Column(String(255), nullable=True)
+    created_at        = Column(DateTime, nullable=True)
+    synced_at         = Column(DateTime, server_default=func.now())
+
+
+class GennisMissionProof(Base):
+    __tablename__ = "gennis_mission_proof"
+
+    id                = Column(BigInteger, primary_key=True, index=True)
+    gennis_id         = Column(Integer, nullable=False, unique=True)
+    mission_gennis_id = Column(Integer, nullable=True, index=True)
+    file_path         = Column(String(500), nullable=True)
+    comment           = Column(Text, nullable=True)
+    management_id     = Column(BigInteger, nullable=True)
+    creator_name      = Column(String(255), nullable=True)
+    created_at        = Column(DateTime, nullable=True)
+    synced_at         = Column(DateTime, server_default=func.now())
+
+
+class GennisMissionAttachment(Base):
+    __tablename__ = "gennis_mission_attachment"
+
+    id                = Column(BigInteger, primary_key=True, index=True)
+    gennis_id         = Column(Integer, nullable=False, unique=True)
+    mission_gennis_id = Column(Integer, nullable=True, index=True)
+    file_path         = Column(String(500), nullable=True)
+    note              = Column(Text, nullable=True)
+    management_id     = Column(BigInteger, nullable=True)
+    creator_name      = Column(String(255), nullable=True)
+    uploaded_at       = Column(DateTime, nullable=True)
+    synced_at         = Column(DateTime, server_default=func.now())
+
+
+class GennisMissionSubtask(Base):
+    __tablename__ = "gennis_mission_subtask"
+
+    id                = Column(BigInteger, primary_key=True, index=True)
+    gennis_id         = Column(Integer, nullable=False, unique=True)
+    mission_gennis_id = Column(Integer, nullable=True, index=True)
+    title             = Column(String(500), nullable=True)
+    is_done           = Column(Boolean, nullable=True)
+    # old gennis called this "order", which is reserved in SQL
+    sort_order        = Column(Integer, nullable=True)
+    management_id     = Column(BigInteger, nullable=True)
+    creator_name      = Column(String(255), nullable=True)
+    created_at        = Column(DateTime, nullable=True)
+    synced_at         = Column(DateTime, server_default=func.now())
+
+
+class GennisManagementInvestment(Base):
+    __tablename__ = "gennis_management_investment"
+
+    id                   = Column(BigInteger, primary_key=True, index=True)
+    gennis_id            = Column(Integer, nullable=False, unique=True)
+    management_gennis_id = Column(Integer, nullable=True)
+    amount               = Column(BigInteger, nullable=True)
+    date                 = Column(Date, nullable=True, index=True)
+    description          = Column(Text, nullable=True)
+    payment_type         = Column(String(100), nullable=True)
+    location_id          = Column(Integer, nullable=True, index=True)
+    deleted              = Column(Boolean, nullable=True)
+    synced_at            = Column(DateTime, server_default=func.now())
+
+
+class GennisManagementDividend(Base):
+    __tablename__ = "gennis_management_dividend"
+
+    id                   = Column(BigInteger, primary_key=True, index=True)
+    gennis_id            = Column(Integer, nullable=False, unique=True)
+    management_gennis_id = Column(Integer, nullable=True)
+    amount               = Column(BigInteger, nullable=True)
+    date                 = Column(Date, nullable=True, index=True)
+    description          = Column(Text, nullable=True)
+    payment_type         = Column(String(100), nullable=True)
+    location_id          = Column(Integer, nullable=True, index=True)
+    deleted              = Column(Boolean, nullable=True)
+    synced_at            = Column(DateTime, server_default=func.now())
+
+
+class GennisCapital(Base):
+    __tablename__ = "gennis_capital"
+
+    id                       = Column(BigInteger, primary_key=True, index=True)
+    gennis_id                = Column(Integer, nullable=False, unique=True)
+    name                     = Column(String(255), nullable=True)
+    number                   = Column(String(100), nullable=True)
+    price                    = Column(BigInteger, nullable=True)
+    term                     = Column(Integer, nullable=True)
+    category_id              = Column(Integer, nullable=True)
+    location_id              = Column(Integer, nullable=True, index=True)
+    account_period_id        = Column(Integer, nullable=True)
+    payment_type_id          = Column(Integer, nullable=True)
+    total_down_cost          = Column(BigInteger, nullable=True)
+    img                      = Column(String(500), nullable=True)
+    deleted                  = Column(Boolean, nullable=True)
+    calendar_day_gennis_id   = Column(Integer, nullable=True)
+    calendar_month_gennis_id = Column(Integer, nullable=True)
+    calendar_year_gennis_id  = Column(Integer, nullable=True)
+    date                     = Column(Date, nullable=True, index=True)
+    year                     = Column(Integer, nullable=True)
+    month                    = Column(Integer, nullable=True)
+    synced_at                = Column(DateTime, server_default=func.now())
+
+
+class GennisMainOverhead(Base):
+    __tablename__ = "gennis_main_overhead"
+
+    id                       = Column(BigInteger, primary_key=True, index=True)
+    gennis_id                = Column(Integer, nullable=False, unique=True)
+    amount_sum               = Column(BigInteger, nullable=True)
+    payment_type_id          = Column(Integer, nullable=True)
+    reason                   = Column(Text, nullable=True)
+    deleted                  = Column(Boolean, nullable=True)
+    deleted_comment          = Column(Text, nullable=True)
+    calendar_day_gennis_id   = Column(Integer, nullable=True)
+    calendar_month_gennis_id = Column(Integer, nullable=True)
+    calendar_year_gennis_id  = Column(Integer, nullable=True)
+    date                     = Column(Date, nullable=True, index=True)
+    year                     = Column(Integer, nullable=True)
+    month                    = Column(Integer, nullable=True)
+    synced_at                = Column(DateTime, server_default=func.now())
+
+
+class GennisOverheadTypeLogPayment(Base):
+    __tablename__ = "gennis_overhead_type_log_payment"
+
+    id                         = Column(BigInteger, primary_key=True, index=True)
+    gennis_id                  = Column(Integer, nullable=False, unique=True)
+    overhead_type_log_gennis_id = Column(Integer, nullable=True, index=True)
+    overhead_gennis_id         = Column(Integer, nullable=True)
+    payment_type_id            = Column(Integer, nullable=True)
+    amount                     = Column(BigInteger, nullable=True)
+    paid_date                  = Column(DateTime, nullable=True)
+    note                       = Column(Text, nullable=True)
+    created_by_gennis_id       = Column(Integer, nullable=True)
+    management_id              = Column(Integer, nullable=True)
+    deleted                    = Column(Boolean, nullable=True)
+    created_at                 = Column(DateTime, nullable=True)
+    synced_at                  = Column(DateTime, server_default=func.now())
+
+
+class GennisReport(Base):
+    __tablename__ = "gennis_report"
+
+    id           = Column(BigInteger, primary_key=True, index=True)
+    gennis_id    = Column(Integer, nullable=False, unique=True)
+    name         = Column(String(255), nullable=True)
+    category     = Column(String(100), nullable=True)
+    program_type = Column(String(100), nullable=True)
+    text         = Column(Text, nullable=True)
+    synced_at    = Column(DateTime, server_default=func.now())
+
+
+class GennisReportMember(Base):
+    __tablename__ = "gennis_report_member"
+
+    id                  = Column(BigInteger, primary_key=True, index=True)
+    gennis_id           = Column(Integer, nullable=False, unique=True)
+    report_gennis_id    = Column(Integer, nullable=True, index=True)
+    member_gennis_id    = Column(Integer, nullable=True)
+    daily_message_count = Column(Integer, nullable=True)
+    synced_at           = Column(DateTime, server_default=func.now())
+
+
 class GennisUserSync(Base):
     __tablename__ = "gennis_user"
 
