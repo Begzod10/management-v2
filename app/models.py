@@ -1,5 +1,6 @@
 from datetime import datetime
 from sqlalchemy import Column, BigInteger, String, Date, DateTime, ForeignKey, Boolean, Integer, Text, Table, UniqueConstraint, Float
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from .database import Base
@@ -1055,6 +1056,171 @@ class GennisLessonPlanStudent(Base):
     student_gennis_id     = Column(Integer, nullable=True, index=True)
     comment               = Column(Text, nullable=True)
     synced_at             = Column(DateTime, server_default=func.now())
+
+
+class GennisTimetableStudent(Base):
+    """Which students attend which timetable slot.
+
+    This and the two below mirror old gennis's time_table_* link tables, which
+    have no id of their own — hence a surrogate id plus a unique constraint on
+    the pair, which is also what makes the sync re-runnable. They stay separate
+    rather than merging into one table with a role column because student,
+    teacher and assistent ids live in three different id spaces; three narrow
+    tables cannot be joined to the wrong mirror.
+    """
+
+    __tablename__ = "gennis_timetable_student"
+    __table_args__ = (
+        UniqueConstraint(
+            "student_gennis_id", "group_room_week_gennis_id",
+            name="uq_gennis_timetable_student_pair",
+        ),
+    )
+
+    id                        = Column(BigInteger, primary_key=True, index=True)
+    student_gennis_id         = Column(Integer, nullable=True, index=True)
+    group_room_week_gennis_id = Column(Integer, nullable=True, index=True)
+    synced_at                 = Column(DateTime, server_default=func.now())
+
+
+class GennisTimetableTeacher(Base):
+    __tablename__ = "gennis_timetable_teacher"
+    __table_args__ = (
+        UniqueConstraint(
+            "teacher_gennis_id", "group_room_week_gennis_id",
+            name="uq_gennis_timetable_teacher_pair",
+        ),
+    )
+
+    id                        = Column(BigInteger, primary_key=True, index=True)
+    teacher_gennis_id         = Column(Integer, nullable=True, index=True)
+    group_room_week_gennis_id = Column(Integer, nullable=True, index=True)
+    synced_at                 = Column(DateTime, server_default=func.now())
+
+
+class GennisTimetableAssistent(Base):
+    __tablename__ = "gennis_timetable_assistent"
+    __table_args__ = (
+        UniqueConstraint(
+            "assistent_gennis_id", "group_room_week_gennis_id",
+            name="uq_gennis_timetable_assistent_pair",
+        ),
+    )
+
+    id                        = Column(BigInteger, primary_key=True, index=True)
+    assistent_gennis_id       = Column(Integer, nullable=True, index=True)
+    group_room_week_gennis_id = Column(Integer, nullable=True, index=True)
+    synced_at                 = Column(DateTime, server_default=func.now())
+
+
+class GennisObservationInfo(Base):
+    """The observation criteria list (9 rows in old gennis)."""
+
+    __tablename__ = "gennis_observation_info"
+
+    id        = Column(BigInteger, primary_key=True, index=True)
+    gennis_id = Column(Integer, nullable=False, unique=True)
+    title     = Column(Text, nullable=True)
+    synced_at = Column(DateTime, server_default=func.now())
+
+
+class GennisObservationOption(Base):
+    """The rating scale an observation criterion is scored against."""
+
+    __tablename__ = "gennis_observation_option"
+
+    id        = Column(BigInteger, primary_key=True, index=True)
+    gennis_id = Column(Integer, nullable=False, unique=True)
+    name      = Column(String(255), nullable=True)
+    value     = Column(Integer, nullable=True)
+    synced_at = Column(DateTime, server_default=func.now())
+
+
+class GennisTeacherObservation(Base):
+    """Per-criterion detail behind gennis_teacher_observation_day.
+
+    Rows whose day/info/option reference dangles are kept (35 of 3,246): the
+    comment is still the observation, and dropping it to satisfy a foreign key
+    would discard the only content the row has.
+    """
+
+    __tablename__ = "gennis_teacher_observation"
+
+    id                           = Column(BigInteger, primary_key=True, index=True)
+    gennis_id                    = Column(Integer, nullable=False, unique=True)
+    observation_day_gennis_id    = Column(Integer, nullable=True, index=True)
+    observation_info_gennis_id   = Column(Integer, nullable=True)
+    observation_option_gennis_id = Column(Integer, nullable=True)
+    comment                      = Column(Text, nullable=True)
+    synced_at                    = Column(DateTime, server_default=func.now())
+
+
+class GennisGroupAttendance(Base):
+    """A group's month of attendance, stored by old gennis as one json blob:
+    {"attendances": [...], "dates": [...], "students_num": N}."""
+
+    __tablename__ = "gennis_group_attendance"
+
+    id                       = Column(BigInteger, primary_key=True, index=True)
+    gennis_id                = Column(Integer, nullable=False, unique=True)
+    group_gennis_id          = Column(Integer, nullable=True, index=True)
+    status                   = Column(Boolean, nullable=True)
+    data                     = Column(JSONB, nullable=True)
+    calendar_month_gennis_id = Column(Integer, nullable=True)
+    calendar_year_gennis_id  = Column(Integer, nullable=True)
+    year                     = Column(Integer, nullable=True)
+    month                    = Column(Integer, nullable=True)
+    synced_at                = Column(DateTime, server_default=func.now())
+
+
+class GennisDeletedTeacherSalary(Base):
+    """Reversed teacher salary payments — the audit trail for money taken back.
+    Companion to the gennis_deleted_* mirrors already here for overhead,
+    capital, teachers and student payments."""
+
+    __tablename__ = "gennis_deleted_teacher_salary"
+
+    id                       = Column(BigInteger, primary_key=True, index=True)
+    gennis_id                = Column(Integer, nullable=False, unique=True)
+    teacher_gennis_id        = Column(Integer, nullable=True, index=True)
+    group_gennis_id          = Column(Integer, nullable=True)
+    payment_sum              = Column(BigInteger, nullable=True)
+    reason                   = Column(Text, nullable=True)
+    payment_type_id          = Column(Integer, nullable=True)
+    location_id              = Column(Integer, nullable=True, index=True)
+    account_period_id        = Column(Integer, nullable=True)
+    deleted_date             = Column(DateTime, nullable=True)
+    reason_deleted           = Column(Text, nullable=True)
+    calendar_day_gennis_id   = Column(Integer, nullable=True)
+    calendar_month_gennis_id = Column(Integer, nullable=True)
+    calendar_year_gennis_id  = Column(Integer, nullable=True)
+    date                     = Column(Date, nullable=True, index=True)
+    year                     = Column(Integer, nullable=True)
+    month                    = Column(Integer, nullable=True)
+    synced_at                = Column(DateTime, server_default=func.now())
+
+
+class GennisDeletedStaffSalary(Base):
+    __tablename__ = "gennis_deleted_staff_salary"
+
+    id                       = Column(BigInteger, primary_key=True, index=True)
+    gennis_id                = Column(Integer, nullable=False, unique=True)
+    staff_gennis_id          = Column(Integer, nullable=True, index=True)
+    profession_id            = Column(Integer, nullable=True)
+    payment_sum              = Column(BigInteger, nullable=True)
+    reason                   = Column(Text, nullable=True)
+    payment_type_id          = Column(Integer, nullable=True)
+    location_id              = Column(Integer, nullable=True, index=True)
+    account_period_id        = Column(Integer, nullable=True)
+    deleted_date             = Column(DateTime, nullable=True)
+    reason_deleted           = Column(Text, nullable=True)
+    calendar_day_gennis_id   = Column(Integer, nullable=True)
+    calendar_month_gennis_id = Column(Integer, nullable=True)
+    calendar_year_gennis_id  = Column(Integer, nullable=True)
+    date                     = Column(Date, nullable=True, index=True)
+    year                     = Column(Integer, nullable=True)
+    month                    = Column(Integer, nullable=True)
+    synced_at                = Column(DateTime, server_default=func.now())
 
 
 class GennisUserSync(Base):
