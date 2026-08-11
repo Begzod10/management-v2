@@ -1039,6 +1039,24 @@ class GennisNotification(Base):
     synced_at          = Column(DateTime, server_default=func.now())
 
 
+class GennisLessonPlanStudent(Base):
+    """Per-student notes on a lesson plan. Mirror of old `lesson_plan_students`.
+
+    Separate from the unprefixed `lesson_plan_student` because that table's FK
+    points at the v2-native `lesson_plan`, while these rows hang off
+    `gennis_lesson_plan`. Same idea, different parent.
+    """
+
+    __tablename__ = "gennis_lesson_plan_student"
+
+    id                    = Column(BigInteger, primary_key=True, index=True)
+    gennis_id             = Column(Integer, nullable=False, unique=True)
+    lesson_plan_gennis_id = Column(Integer, nullable=True, index=True)
+    student_gennis_id     = Column(Integer, nullable=True, index=True)
+    comment               = Column(Text, nullable=True)
+    synced_at             = Column(DateTime, server_default=func.now())
+
+
 class GennisUserSync(Base):
     __tablename__ = "gennis_user"
 
