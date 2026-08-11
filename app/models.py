@@ -1502,8 +1502,12 @@ class GennisManagementDividend(Base):
     synced_at            = Column(DateTime, server_default=func.now())
 
 
-class GennisCapital(Base):
-    __tablename__ = "gennis_capital"
+class GennisCapitalAsset(Base):
+    """The fixed-asset register (old gennis `capital`). Named _asset because
+    gennis_capital_expenditure already holds the index name
+    uq_gennis_capital_gennis_id, and Postgres shares that namespace."""
+
+    __tablename__ = "gennis_capital_asset"
 
     id                       = Column(BigInteger, primary_key=True, index=True)
     gennis_id                = Column(Integer, nullable=False, unique=True)

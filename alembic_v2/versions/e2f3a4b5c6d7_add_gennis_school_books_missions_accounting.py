@@ -24,6 +24,14 @@ would put old missions into real users' lists in v2. Three of them also have a
 NULL creator_id, which is NOT NULL there, and old id 15 collides with an
 existing v2 mission. Same reasoning as gennis_notification.
 
+Old `capital` becomes gennis_capital_asset, not gennis_capital: an earlier
+migration already took the index name uq_gennis_capital_gennis_id for
+gennis_capital_expenditure, and Postgres keeps constraint names in the same
+namespace as tables, so the natural name collides. The longer name is more
+accurate anyway — this is the fixed-asset register (term, total_down_cost,
+img), distinct from capital_expenditure (the spend) and capital_term (the
+depreciation schedule).
+
 Two columns are renamed because the source names are reserved words in SQL:
 book.desc -> description, mission_subtasks.order -> sort_order.
 
@@ -58,7 +66,7 @@ TABLES = (
     "gennis_mission_subtask",
     "gennis_management_investment",
     "gennis_management_dividend",
-    "gennis_capital",
+    "gennis_capital_asset",
     "gennis_main_overhead",
     "gennis_overhead_type_log_payment",
     "gennis_report",
@@ -298,7 +306,7 @@ def upgrade() -> None:
             ),
         )
     op.create_table(
-        "gennis_capital",
+        "gennis_capital_asset",
         *_common(
             sa.Column("name", sa.String(255), nullable=True),
             sa.Column("number", sa.String(100), nullable=True),
