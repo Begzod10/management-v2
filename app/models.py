@@ -2244,3 +2244,34 @@ class GennisStudentDropLog(Base):
     calendar_day_gennis_id = Column(Integer, nullable=True)
     date                   = Column(Date, nullable=True, index=True)
     synced_at              = Column(DateTime, server_default=func.now())
+
+
+class GennisLessonDiscount(Base):
+    """Per-lesson discounts from old gennis.
+
+    Old gennis has no discount table — discounts are columns on attendancedays,
+    and gennis_lesson_attendance kept only the attendance facts, so the money
+    side of each lesson had no home. One row here per flagged source row.
+
+    Keyed on the attendancedays id, not on (group, student, date):
+    gennis_lesson_attendance collapses duplicate lesson rows, and a date-keyed
+    discount table would lose the duplicates' amounts along with them.
+
+    discount_amount is signed — production holds negative values.
+    """
+
+    __tablename__ = "gennis_lesson_discount"
+
+    id                     = Column(BigInteger, primary_key=True, index=True)
+    gennis_id              = Column(Integer, nullable=False, unique=True)
+    student_gennis_id      = Column(Integer, nullable=True, index=True)
+    group_gennis_id        = Column(Integer, nullable=True, index=True)
+    teacher_gennis_id      = Column(Integer, nullable=True)
+    location_id            = Column(Integer, nullable=True, index=True)
+    lesson_date            = Column(Date, nullable=True, index=True)
+    calendar_day_gennis_id = Column(Integer, nullable=True)
+    has_discount           = Column(Boolean, nullable=True)
+    discount_amount        = Column(Integer, nullable=True)
+    balance_per_day        = Column(Integer, nullable=True)
+    balance_with_discount  = Column(Integer, nullable=True)
+    synced_at              = Column(DateTime, server_default=func.now())
