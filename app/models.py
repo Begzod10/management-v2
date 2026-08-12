@@ -2215,3 +2215,32 @@ class GennisLocationSubject(Base):
 
     subject  = relationship("GennisSubject")
     location = relationship("GennisLocation")
+
+
+class GennisStudentDropLog(Base):
+    """Every group-level drop from old gennis, in full.
+
+    gennis_deleted_student_group holds the *current* state — one row per
+    (student, group) pair, with the free-text reason — because that is what
+    the deleted-students list and the student history read. This holds the
+    events behind it: when the drop happened (never migrated before, hence
+    the empty "left_day" in students/history.py), which teacher's group it
+    was, the structured reason_id, and the repeat drops that the pair-unique
+    constraint collapses.
+
+    Archive only — nothing reads it yet. It exists so the drop history stays
+    answerable once old gennis is switched off.
+    """
+
+    __tablename__ = "gennis_student_drop_log"
+
+    id                     = Column(BigInteger, primary_key=True, index=True)
+    gennis_id              = Column(Integer, nullable=False, unique=True)
+    student_gennis_id      = Column(Integer, nullable=True, index=True)
+    group_gennis_id        = Column(Integer, nullable=True, index=True)
+    teacher_gennis_id      = Column(Integer, nullable=True)
+    reason                 = Column(Text, nullable=True)
+    reason_id              = Column(Integer, nullable=True)
+    calendar_day_gennis_id = Column(Integer, nullable=True)
+    date                   = Column(Date, nullable=True, index=True)
+    synced_at              = Column(DateTime, server_default=func.now())
