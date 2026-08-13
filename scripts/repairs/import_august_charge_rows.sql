@@ -1,3 +1,15 @@
+-- ⚠️  DO NOT RUN. THIS SCRIPT WAS WRONG AND HAS BEEN UNDONE.
+--
+-- 546 of the 553 rows it inserted were DUPLICATES of charge rows that already
+-- existed. gennis_attendance_history_student.group_id holds two id spaces —
+-- rows synced from old gennis store the OLD GENNIS group id, rows created by
+-- attendance/mark.py store the management gennis_group.id. The gap query below
+-- compared it against gennis_lesson_attendance.group_id (always the management
+-- id), so every row stored under the old convention looked missing.
+--
+-- Kept only as the record of the mistake. The removal is in
+-- undo_duplicate_august_rows.sql; the 7 rows that were genuinely new were kept.
+--
 -- Import August 2026 charge rows that exist in old gennis but never reached v2.
 --
 -- WHY THERE ARE SO MANY

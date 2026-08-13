@@ -48,16 +48,44 @@ from ground truth — but it takes an extra pass to converge.
 | `rebuild_student_credit.sql` | `gennis_student_credit` 287 → 10,587 rows |
 | `clamp_credit_to_surplus.sql` | 3,196 rows set to 0 — see below |
 | `import_missing_history_rows.sql` | 8 charge rows that exist in old gennis but never reached v2 |
-| `import_august_charge_rows.sql` | 553 more of the same, at (student, **group**, month) granularity |
+| `import_august_charge_rows.sql` | ⚠️ **WRONG — do not run.** Inserted 546 duplicates |
+| `undo_duplicate_august_rows.sql` | removed those 546; kept the 7 that were genuinely new |
 
-### Granularity trap
+### The group_id trap — read this before measuring "missing" rows
 
-`import_missing_history_rows.sql` found only 8 because it looked for students with
-**no** charge row for the month. Charge rows are per (student, GROUP, month): a
-student in two groups can have one and be missing the other, and that turned out to
-be the common case. At the right granularity the August gap was 615 pairs, of which
-553 already existed in old gennis — 60,166,489 charged, 14,086,211 of it still owed.
-The remaining 62 have no charge row in old gennis either and were left alone.
+`gennis_attendance_history_student.group_id` holds **two different id spaces**:
+
+- rows synced from old gennis store the **old gennis** group id (e.g. `605`)
+- rows created by `attendance/mark.py` store the **management** `gennis_group.id`
+  (e.g. `12014`)
+
+`gennis_lesson_attendance.group_id` is always the management id — `sync_attendance.py`
+translates it. So comparing the two tables on `group_id` silently fails for every row
+stored under the old convention, and makes existing charge rows look missing.
+
+That is exactly what happened: 615 (student, group) pairs looked unbilled for August
+2026, 553 were "imported", and 546 of those turned out to be duplicates of rows that
+were there all along. Verified concretely — student 215480, August 2026, E13A1-10:
+
+```
+id 69049  group_id   605  total_debt  30,769  synced 2026-08-04   already there
+id 70185  group_id 12014  total_debt 123,076  synced 2026-08-13   the duplicate
+```
+
+Match on `(student_id, calendar_year, calendar_month, group_name)` instead —
+`group_name` is denormalized on both sides and does not depend on the id space.
+
+`import_missing_history_rows.sql` escaped this because it keyed on student+month for
+students with **no** row at all, so it never compared a group_id. Its 8 rows were
+checked afterwards: 0 duplicates.
+
+### Still unresolved: the same collision happens without any script
+
+`mark.py` writes the management group id while the sync writes the old gennis one, so
+both can create a row for the same (student, group, month). **143 duplicate sets exist
+in August 2026 alone** that nothing in this directory created, holding 4,855,142 so'm
+of duplicated 2026 debt. That is a live double-counting bug in the application, not a
+migration artefact, and it needs fixing at the source.
 
 `rebuild_student_credit.sql` now computes `GREATEST(0, paid - applied)` directly,
 so `clamp_credit_to_surplus.sql` is only of historical interest — it is what

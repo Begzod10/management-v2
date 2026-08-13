@@ -916,41 +916,79 @@ def sync_deleted_charities(gc, mc):
 # ── attendance history drift fix ───────────────────────────────────────────────
 
 def sync_attendance_history_drift(gc, mc, months=3):
-    """Update attendance_history totals for the last N months from gennis-old.
+    """Upsert attendance_history for the last N months from gennis-old.
 
-    Attendance records are recalculated monthly in gennis-old when attendance
-    is marked, so this keeps management-v2 in sync with recent changes.
+    Attendance records are recalculated monthly in gennis-old when attendance is
+    marked, so this keeps management-v2 in sync with recent changes.
+
+    This used to be an UPDATE keyed on `t.id = d.id`, which could only ever
+    correct rows that were ALREADY here — a row created in gennis-old (a new
+    month starting, or a student joining a group mid-month) matched nothing and
+    was silently dropped. New rows only arrived when somebody remembered to run
+    `--seed-attendance`, a full-table upsert nobody runs routinely.
+
+    Now an INSERT … ON CONFLICT (id) DO UPDATE over the same recent window, so
+    new rows arrive on the regular run and existing ones still get corrected.
+
+    No missing-row gap had actually accumulated when this was changed — every
+    gennis-old id in the 3-month window was already present — so this is
+    defence against a hole in the logic rather than a fix for observed damage.
+    Do not use it to justify backfills: see
+    scripts/repairs/undo_duplicate_august_rows.sql for what happened when a
+    "missing rows" measurement was trusted without checking that
+    gennis_attendance_history_student.group_id holds two different id spaces.
     """
     gc.execute("""
         SELECT
             ahs.id,
-            COALESCE(ahs.total_debt, 0)     AS total_debt,
-            COALESCE(ahs.payment, 0)        AS payment,
-            COALESCE(ahs.remaining_debt, 0) AS remaining_debt,
-            COALESCE(ahs.total_discount, 0) AS total_discount,
-            COALESCE(ahs.status, false)     AS status
+            ahs.student_id,
+            COALESCE(u.name || ' ' || u.surname, '') AS student_name,
+            ahs.group_id,
+            COALESCE(g.name, '')                     AS group_name,
+            ahs.subject_id,
+            COALESCE(ahs.total_debt, 0)              AS total_debt,
+            COALESCE(ahs.payment, 0)                 AS payment,
+            COALESCE(ahs.remaining_debt, 0)          AS remaining_debt,
+            COALESCE(ahs.total_discount, 0)          AS total_discount,
+            ahs.location_id,
+            EXTRACT(MONTH FROM cm.date)::int         AS calendar_month,
+            EXTRACT(YEAR  FROM cy.date)::int         AS calendar_year,
+            COALESCE(ahs.status, false)              AS status
         FROM attendancehistorystudent ahs
         JOIN calendarmonth cm ON cm.id = ahs.calendar_month
         JOIN calendaryear  cy ON cy.id = ahs.calendar_year
+        LEFT JOIN students s  ON s.id  = ahs.student_id
+        LEFT JOIN users u     ON u.id  = s.user_id
+        LEFT JOIN groups g    ON g.id  = ahs.group_id
         WHERE DATE_TRUNC('month', cm.date::date) >=
               DATE_TRUNC('month', CURRENT_DATE) - (%s || ' months')::interval
+        ORDER BY ahs.id
     """, (months,))
     rows = gc.fetchall()
     if not rows:
         print(f"  Attendance drift fix: 0 rows")
         return
     execute_values(mc, """
-        UPDATE gennis_attendance_history_student AS t
-        SET total_debt     = d.total_debt,
-            payment        = d.payment,
-            remaining_debt = d.remaining_debt,
-            total_discount = d.total_discount,
-            status         = d.status,
+        INSERT INTO gennis_attendance_history_student
+            (id, student_id, student_name, group_id, group_name, subject_id,
+             total_debt, payment, remaining_debt, total_discount,
+             location_id, calendar_month, calendar_year, status)
+        VALUES %s
+        ON CONFLICT (id) DO UPDATE SET
+            student_name   = EXCLUDED.student_name,
+            group_name     = EXCLUDED.group_name,
+            total_debt     = EXCLUDED.total_debt,
+            payment        = EXCLUDED.payment,
+            remaining_debt = EXCLUDED.remaining_debt,
+            total_discount = EXCLUDED.total_discount,
+            status         = EXCLUDED.status,
             synced_at      = NOW()
-        FROM (VALUES %s) AS d(id, total_debt, payment, remaining_debt, total_discount, status)
-        WHERE t.id = d.id
-    """, rows)
-    print(f"  Attendance drift fix: {len(rows)} rows updated (last {months} months)")
+    """, rows, page_size=2000)
+    # ids come from gennis-old, so the local sequence has to be pushed past them
+    # or the next locally-created row (attendance/mark.py) collides on the PK.
+    reset_sequence(mc, "gennis_attendance_history_student",
+                   "gennis_attendance_history_student_id_seq")
+    print(f"  Attendance drift fix: {len(rows)} rows upserted (last {months} months)")
 
 
 # ── main ──────────────────────────────────────────────────────────────────────
