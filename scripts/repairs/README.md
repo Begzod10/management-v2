@@ -46,6 +46,21 @@ from ground truth — but it takes an extra pass to converge.
 | `zero_phantom_charges.sql` | 52 rows / 43 students; removed 9,442,644 charged, 7,307,201 owed |
 | `apply_student_payments.sql` | 5,441 rows; applied 649,367,418 |
 | `rebuild_student_credit.sql` | `gennis_student_credit` 287 → 10,587 rows |
+| `clamp_credit_to_surplus.sql` | 3,196 rows set to 0 — run **after** the rebuild, see below |
+
+### Why the fourth script exists
+
+`rebuild_student_credit.sql` wrote a NET balance (negative for students in debt).
+Hours later, gennis-v2 commit `e038344` settled the opposite convention:
+`gennis_attendance_history_student` is the single source of truth for debt, and
+`GennisStudentCredit` holds payment surplus only. The display code reconciles the
+two with `-max(debt, -credit)`, taking whichever claims more is owed — safe while
+the negative rows agree with the history, but the stale value wins once debt is
+paid down. Within hours that had already overstated 415 students by 42,505,188
+so'm. Clamping the negatives to zero leaves debt with exactly one writer.
+
+A fresh run should therefore end with the clamp, or simpler: change the rebuild's
+formula to `GREATEST(0, paid - applied)` and skip the net-balance step entirely.
 
 ## What makes the result trustworthy
 
