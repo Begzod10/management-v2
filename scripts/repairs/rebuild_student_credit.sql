@@ -8,7 +8,13 @@
 -- student a correct row here is what makes it possible to delete that fallback.
 --
 -- THE FORMULA
---     balance = (payments made - payments applied to months) - remaining debt
+--     balance = GREATEST(0, payments made - payments applied to months)
+--
+-- SURPLUS ONLY. This originally stored a NET balance (negative for debtors), but
+-- gennis-v2 e038344 settled the opposite convention: gennis_attendance_history_student
+-- is the single source of truth for debt and this column holds payment surplus.
+-- Keeping debt here too gave it two writers that drift - see
+-- clamp_credit_to_surplus.sql for the 415 students that overstated within hours.
 --
 -- The first bracket is the student's unspent money: after apply_student_payments.sql
 -- poured every payment into their oldest unpaid months, whatever did not fit is
@@ -57,7 +63,7 @@ SELECT
     COALESCE(p.paid, 0)                                        AS paid,
     COALESCE(a.applied, 0)                                     AS applied,
     COALESCE(a.debt, 0)                                        AS debt,
-    (COALESCE(p.paid,0) - COALESCE(a.applied,0)) - COALESCE(a.debt,0) AS balance
+    GREATEST(0, COALESCE(p.paid,0) - COALESCE(a.applied,0)) AS balance
 FROM paid p FULL OUTER JOIN applied a USING (student_id);
 
 \echo ''
