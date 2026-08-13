@@ -48,6 +48,16 @@ from ground truth — but it takes an extra pass to converge.
 | `rebuild_student_credit.sql` | `gennis_student_credit` 287 → 10,587 rows |
 | `clamp_credit_to_surplus.sql` | 3,196 rows set to 0 — see below |
 | `import_missing_history_rows.sql` | 8 charge rows that exist in old gennis but never reached v2 |
+| `import_august_charge_rows.sql` | 553 more of the same, at (student, **group**, month) granularity |
+
+### Granularity trap
+
+`import_missing_history_rows.sql` found only 8 because it looked for students with
+**no** charge row for the month. Charge rows are per (student, GROUP, month): a
+student in two groups can have one and be missing the other, and that turned out to
+be the common case. At the right granularity the August gap was 615 pairs, of which
+553 already existed in old gennis — 60,166,489 charged, 14,086,211 of it still owed.
+The remaining 62 have no charge row in old gennis either and were left alone.
 
 `rebuild_student_credit.sql` now computes `GREATEST(0, paid - applied)` directly,
 so `clamp_credit_to_surplus.sql` is only of historical interest — it is what
