@@ -44,6 +44,48 @@ def get_last_date(mgmt_cur, table, date_col="paid_date"):
     return DEFAULT_SINCE
 
 
+def attendance_id_maps(mc):
+    """gennis_id -> local PK maps for translating attendancehistorystudent rows.
+
+    gennis_attendance_history_student.student_id and .group_id hold THIS DB's
+    ids (gennis_student.id / gennis_group.id), not the gennis-old ones. The two
+    spaces are disjoint, so copying the source ids straight across silently
+    writes rows that point at nothing — or worse, at a different group that
+    happens to share the number.
+
+    817 rows already carry an untranslated group_id from earlier runs. Because
+    attendance/mark.py writes the correct local id, the same (student, group,
+    month) ends up stored twice under two conventions, and the debt is counted
+    twice: 143 duplicate sets in August 2026 alone, 4,855,142 so'm of 2026 debt.
+    """
+    mc.execute("SELECT gennis_id, id FROM gennis_student WHERE gennis_id IS NOT NULL")
+    students = dict(mc.fetchall())
+    mc.execute("SELECT gennis_id, id FROM gennis_group WHERE gennis_id IS NOT NULL")
+    groups = dict(mc.fetchall())
+    return students, groups
+
+
+def remap_attendance_rows(rows, students, groups):
+    """Translate (id, student_id, …, group_id, …) tuples onto local ids.
+
+    Rows whose student cannot be resolved are dropped rather than inserted with a
+    dangling key — the caller reports the count. An unresolvable group is left
+    NULL, which the table already allows (1,554 such rows exist), because the
+    month's charge still belongs to the student even if the group is unknown.
+    """
+    out, unmapped = [], 0
+    for r in rows:
+        r = list(r)
+        student_id = students.get(r[1])
+        if student_id is None:
+            unmapped += 1
+            continue
+        r[1] = student_id
+        r[3] = groups.get(r[3])
+        out.append(tuple(r))
+    return out, unmapped
+
+
 def reset_sequence(mgmt_cur, table, seq_name):
     mgmt_cur.execute(
         "SELECT EXISTS(SELECT 1 FROM pg_sequences WHERE sequencename = %s)", (seq_name,)
@@ -968,6 +1010,12 @@ def sync_attendance_history_drift(gc, mc, months=3):
     if not rows:
         print(f"  Attendance drift fix: 0 rows")
         return
+    students, groups = attendance_id_maps(mc)
+    rows, unmapped = remap_attendance_rows(rows, students, groups)
+    if unmapped:
+        print(f"  Attendance drift fix: {unmapped} row(s) skipped — student not in this DB")
+    if not rows:
+        return
     execute_values(mc, """
         INSERT INTO gennis_attendance_history_student
             (id, student_id, student_name, group_id, group_name, subject_id,
@@ -1025,6 +1073,12 @@ def seed_attendance_history(gc, mc):
     rows = gc.fetchall()
     if not rows:
         print("  Attendance history seed: 0 records")
+        return
+    students, groups = attendance_id_maps(mc)
+    rows, unmapped = remap_attendance_rows(rows, students, groups)
+    if unmapped:
+        print(f"  Attendance history seed: {unmapped} row(s) skipped — student not in this DB")
+    if not rows:
         return
     execute_values(mc, """
         INSERT INTO gennis_attendance_history_student
