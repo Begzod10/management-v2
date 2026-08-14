@@ -1003,7 +1003,11 @@ def sync_attendance_history_drift(gc, mc, months=3):
             ahs.location_id,
             EXTRACT(MONTH FROM cm.date)::int         AS calendar_month,
             EXTRACT(YEAR  FROM cy.date)::int         AS calendar_year,
-            COALESCE(ahs.status, false)              AS status
+            COALESCE(ahs.status, false)              AS status,
+            ahs.present_days,
+            ahs.absent_days,
+            ahs.average_ball,
+            ahs.scored_days
         FROM attendancehistorystudent ahs
         JOIN calendarmonth cm ON cm.id = ahs.calendar_month
         JOIN calendaryear  cy ON cy.id = ahs.calendar_year
@@ -1028,7 +1032,8 @@ def sync_attendance_history_drift(gc, mc, months=3):
         INSERT INTO gennis_attendance_history_student
             (id, student_id, student_name, group_id, group_name, subject_id,
              total_debt, payment, remaining_debt, total_discount,
-             location_id, calendar_month, calendar_year, status)
+             location_id, calendar_month, calendar_year, status,
+             present_days, absent_days, average_ball, scored_days)
         VALUES %s
         ON CONFLICT (id) DO UPDATE SET
             student_name   = EXCLUDED.student_name,
@@ -1038,6 +1043,10 @@ def sync_attendance_history_drift(gc, mc, months=3):
             remaining_debt = EXCLUDED.remaining_debt,
             total_discount = EXCLUDED.total_discount,
             status         = EXCLUDED.status,
+            present_days   = EXCLUDED.present_days,
+            absent_days    = EXCLUDED.absent_days,
+            average_ball   = EXCLUDED.average_ball,
+            scored_days    = EXCLUDED.scored_days,
             synced_at      = NOW()
     """, rows, page_size=2000)
     # ids come from gennis-old, so the local sequence has to be pushed past them
@@ -1069,7 +1078,11 @@ def seed_attendance_history(gc, mc):
             ahs.location_id,
             EXTRACT(MONTH FROM cm.date)::int         AS calendar_month,
             EXTRACT(YEAR  FROM cy.date)::int         AS calendar_year,
-            COALESCE(ahs.status, false)              AS status
+            COALESCE(ahs.status, false)              AS status,
+            ahs.present_days,
+            ahs.absent_days,
+            ahs.average_ball,
+            ahs.scored_days
         FROM attendancehistorystudent ahs
         JOIN calendarmonth cm ON cm.id = ahs.calendar_month
         JOIN calendaryear  cy ON cy.id = ahs.calendar_year
@@ -1092,7 +1105,8 @@ def seed_attendance_history(gc, mc):
         INSERT INTO gennis_attendance_history_student
             (id, student_id, student_name, group_id, group_name, subject_id,
              total_debt, payment, remaining_debt, total_discount,
-             location_id, calendar_month, calendar_year, status)
+             location_id, calendar_month, calendar_year, status,
+             present_days, absent_days, average_ball, scored_days)
         VALUES %s
         ON CONFLICT (id) DO UPDATE SET
             student_name   = EXCLUDED.student_name,
@@ -1102,6 +1116,10 @@ def seed_attendance_history(gc, mc):
             remaining_debt = EXCLUDED.remaining_debt,
             total_discount = EXCLUDED.total_discount,
             status         = EXCLUDED.status,
+            present_days   = EXCLUDED.present_days,
+            absent_days    = EXCLUDED.absent_days,
+            average_ball   = EXCLUDED.average_ball,
+            scored_days    = EXCLUDED.scored_days,
             synced_at      = NOW()
     """, rows, page_size=2000)
     reset_sequence(mc, "gennis_attendance_history_student", "gennis_attendance_history_student_id_seq")
