@@ -131,6 +131,8 @@ def sync_student_payments(gc, mc, since):
              channel, is_real_payment, paid_date, calendar_month, calendar_year, deleted)
         VALUES %s
         ON CONFLICT (id) DO UPDATE SET
+            student_id      = EXCLUDED.student_id,
+            location_id     = EXCLUDED.location_id,
             student_name    = EXCLUDED.student_name,
             payment_sum     = EXCLUDED.payment_sum,
             channel         = EXCLUDED.channel,
@@ -213,6 +215,8 @@ def sync_teacher_salary(gc, mc, since):
              channel, paid_date, calendar_month, calendar_year, reason, deleted)
         VALUES %s
         ON CONFLICT (id) DO UPDATE SET
+            teacher_id     = EXCLUDED.teacher_id,
+            location_id    = EXCLUDED.location_id,
             teacher_name   = EXCLUDED.teacher_name,
             payment_sum    = EXCLUDED.payment_sum,
             channel        = EXCLUDED.channel,
@@ -265,6 +269,8 @@ def sync_assistent_salary(gc, mc, since):
              channel, paid_date, calendar_month, calendar_year, reason, deleted)
         VALUES %s
         ON CONFLICT (id) DO UPDATE SET
+            assistent_id   = EXCLUDED.assistent_id,
+            location_id    = EXCLUDED.location_id,
             assistent_name = EXCLUDED.assistent_name,
             payment_sum    = EXCLUDED.payment_sum,
             channel        = EXCLUDED.channel,
@@ -319,6 +325,8 @@ def sync_staff_salary(gc, mc, since):
              channel, paid_date, calendar_month, calendar_year, reason, deleted)
         VALUES %s
         ON CONFLICT (id) DO UPDATE SET
+            staff_id       = EXCLUDED.staff_id,
+            location_id    = EXCLUDED.location_id,
             staff_name     = EXCLUDED.staff_name,
             job            = EXCLUDED.job,
             payment_sum    = EXCLUDED.payment_sum,
