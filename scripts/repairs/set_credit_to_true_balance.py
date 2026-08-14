@@ -75,6 +75,11 @@ corrections, which are safe under the existing payment logic, and reports the
 debt row (so a future payment reduces it the normal way), not into credit, and
 that is a design decision on its own, not a data fix to run alongside this one.
 
+APPLIED 2026-08-14: 1,182 positive corrections written. Verified afterwards:
+v2's live displayed balance now matches old gennis on August-clean students
+went 12,742 -> 13,105 of 15,075 (84.5% -> 86.9%). The 1,291 negative
+corrections remain unapplied, reported only.
+
 Usage:
     python set_credit_to_true_balance.py            dry run (default)
     python set_credit_to_true_balance.py --apply     write (positive corrections only)
