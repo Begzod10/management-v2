@@ -37,6 +37,10 @@
 -- Capped at remaining_debt in PART A so it can never push a row into credit; that is
 -- what makes A safe and B a decision.
 --
+-- PART A APPLIED 2026-08-14: 22 rows, 20 students, 178,738 released (Jul 89,061,
+-- Aug 89,677). Afterwards 0 of those rows still carried no discount and 0 violated
+-- remaining_debt = total_debt - payment. PART B remains a decision and is untouched.
+--
 -- Usage:  psql -v apply=0   -- dry run (DEFAULT)
 --         psql -v apply=1   -- performs PART A only
 
