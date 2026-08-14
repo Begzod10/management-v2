@@ -40,6 +40,14 @@
 -- Ids are literal because old gennis is frozen, so the correct answer cannot move.
 -- Re-runnable: the DELETE is a no-op once gone, the INSERT is ON CONFLICT DO NOTHING.
 --
+-- APPLIED 2026-08-14. Afterwards, of 164 groups 147 have identical membership and
+-- there are 0 real extras left. Two rows remain unmatched, neither a defect here:
+--   * 16 enrolments in the synthetic Test guruh groups, excluded by design
+--   * old group 942 (SH-Ind, Nurafshon) with student 16158 (Jabbor Samandarov).
+--     Neither exists in v2 at all: v2's highest real ids are group 941 and student
+--     16157, so these two were created in old gennis after the last copy ran and
+--     were never brought across. Adding them is a separate job.
+--
 -- Usage:  psql -v apply=0   -- dry run (DEFAULT)
 --         psql -v apply=1   -- write
 
