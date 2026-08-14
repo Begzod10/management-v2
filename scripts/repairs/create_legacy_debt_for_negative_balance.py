@@ -47,6 +47,14 @@ WHAT THIS DOES NOT DO
   - Does not invent an enrollment -- group_id stays NULL rather than guessing
     which class the money belongs to.
 
+APPLIED 2026-08-14: 1,291 legacy debt rows written, 108,129,663 total, credit
+zeroed for each. Verified afterwards: v2's LIVE displayed balance
+(credit - positive remaining_debt) now matches old gennis's own stored
+balance for 14,252/15,075 (94.5%) August-clean students -- up from
+12,742/15,075 (84.5%) before any of today's balance work, and identical to
+the formula's own accuracy ceiling measured before this row was ever
+written. The storage mechanism added zero error.
+
 Usage:
     python create_legacy_debt_for_negative_balance.py            dry run (default)
     python create_legacy_debt_for_negative_balance.py --apply     write
