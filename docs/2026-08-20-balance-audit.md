@@ -136,6 +136,78 @@ since it's the opposite direction of everything else (hides debt rather than
 overstating it). Credit corrected to 0; the 4 old unpaid rows left as
 genuine debt.
 
+### 9. Teacher salary — stale sync, one groupd-config error (Temur Abdullayev)
+First look outside student balances, into `gennis_teacher_salary`. Same shape
+of bug, different table.
+
+- **Stale sync**: his July row (`id=2311`) showed `total_salary=2,501,901`,
+  last `synced_at` 2026-08-19 12:43. Old gennis's own `teachersalary` for the
+  same month was `4,782,322` — and had been since 2026-08-04 (all 168
+  underlying `attendancedays` rows created by then), so the Aug-19 sync run
+  should have picked up the final number and didn't. `management_celery` /
+  `management_celery_beat` had only been up ~17 minutes when checked —
+  looks like the periodic sync job (`scripts/sync_gennis_accounting.py`,
+  `sync_total_salary`) had a gap and this row missed a refresh cycle before
+  restarting. Corrected directly to match old gennis's (verified, formula
+  confirmed identical between both systems) figure: total_salary 4,782,322,
+  remaining_salary 4,232,609.
+- **Group-config error**: his Tarix01 group (`gennis_group.id=12200`,
+  `gennis_id=840`) had `teacher_salary=192,500` in v2 vs old gennis's
+  `385,000` — exactly half, from the 2026-07-25 group sync. Corrected to
+  385,000 so future accrual (once old gennis fully retires and v2 has to
+  self-compute) prices correctly.
+
+**Open question, not resolved today**: how many *other* teacher rows have
+the same stale-sync gap from the same celery restart. Not checked — this was
+a single-teacher investigation prompted by one screenshot.
+
+### 10. Per-lesson discount-shortfall bug — 173 rows, ~2.15M so'm
+Distinct from #2 above (that one was `total_discount` tracked but not
+applied; this one is `total_discount` under-tracked from the start — some
+individual lessons within a month get the standing Xayriya discount, others
+in the *same row* don't). Found via two manual balance checks (Kamola
+Abdulazizova, Gulnora Turg'unova) where the displayed remaining_debt didn't
+match a re-derivation from the group's own price/discount/attendance_days.
+
+Detection method (robust — doesn't depend on the sometimes-unreliable
+`gennis_lesson_attendance` attendance log): for every unpaid row with an
+active charity for that (student, group), let `P = price // attendance_days`,
+`D = charity // attendance_days`, `E = P - D`. If `total_discount` decomposes
+cleanly as `k·D` and `total_debt - k·E` decomposes cleanly as `m·P` (both
+within ±2 so'm of an integer), the row got `k` lessons discounted and `m`
+lessons charged full price when they shouldn't have been. Correct value is
+`(k+m)·E` / `(k+m)·D`.
+
+Ran against all 580 unpaid rows with an active charity:
+- **173 fixed** — 2,148,803 so'm in total debt reduction; 70,970 so'm of that
+  (rows where payment already exceeded the corrected debt) moved into
+  `gennis_student_credit` as surplus rather than left as a negative
+  remaining_debt.
+- 339 left untouched — didn't decompose cleanly, not this bug.
+- 68 initially flagged "reconstructed total ≥ stored total" (a different,
+  more dangerous direction — would mean *reducing* a discount, i.e.
+  increasing debt) — re-checked individually after the fact: all 68 were
+  exact matches already (a dead-code bug in the first verification script
+  conflated "already correct" with "genuinely higher"); zero real cases of
+  discount being over-applied.
+- 0 failures on reverify.
+
+Spot-checked 3 of the 173 by hand against the group's raw price/discount —
+all decomposed exactly, no rounding slop.
+
+**Mistake caught mid-fix**: manually correcting Gulnora Turg'unova's 3 rows,
+wrote `remaining_debt` as negative. Convention throughout this table is
+positive-for-owed (`remaining_debt = total_debt - payment`); caught and
+corrected before it reached the batch script (which used the correct sign
+from the start).
+
+**Root cause not found** — confirmed the bug is intermittent (one row for a
+student can be 100% correctly discounted while another row, same student,
+same group, adjacent month, has some lessons missing it entirely), but
+didn't trace which mark.py code path produces the miss. Not urgent to chase
+further since the 173-row fix already covers the known extent, but worth
+knowing if the same pattern reappears for lessons marked after today.
+
 ## Lesson learned, applied going forward
 
 Every aggregate/batch approach tried today had a real error rate until
