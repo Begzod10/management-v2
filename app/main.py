@@ -150,9 +150,9 @@ async def log_requests(request: Request, call_next):
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "100.81.196.80:3000",
+    allow_origins=["http://localhost:3000", "http://localhost:5173", "100.81.196.80:3000",
                     "https://office.gennis.uz", "https://school.gennis.uz",
-                    "https://admin.gennis.uz"],
+                    "https://admin.gennis.uz", "https://management.gennis.uz"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
