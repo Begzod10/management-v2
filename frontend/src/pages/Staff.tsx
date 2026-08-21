@@ -20,7 +20,7 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { Plus, Pencil, Trash2, Loader2, Eye, EyeOff, UserX, Check, X, Copy } from "lucide-react";
+import { Plus, Pencil, Trash2, Loader2, Eye, EyeOff, UserX, Check, X, Copy, Search, ChevronLeft, ChevronRight } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
@@ -41,6 +41,38 @@ interface User {
 }
 
 interface Job { id: number; name: string; }
+
+const LIMIT = 50;
+
+// ─── Pagination (offset-based, matches SchoolTeachers.tsx's own local copy) ───
+function Pagination({
+  count, offset, onOffsetChange,
+}: {
+  count: number; offset: number; onOffsetChange: (o: number) => void;
+}) {
+  const totalPages = Math.ceil(count / LIMIT);
+  const currentPage = Math.floor(offset / LIMIT) + 1;
+  if (totalPages <= 1) return null;
+
+  return (
+    <div className="flex items-center justify-between mt-3 shrink-0 text-sm text-muted-foreground">
+      <span>{offset + 1}–{Math.min(offset + LIMIT, count)} / {count}</span>
+      <div className="flex items-center gap-1">
+        <Button variant="outline" size="icon" className="h-8 w-8"
+          disabled={currentPage === 1} onClick={() => onOffsetChange(offset - LIMIT)}>
+          <ChevronLeft className="h-4 w-4" />
+        </Button>
+        <span className="px-3 py-1 border rounded-md bg-muted text-xs font-medium">
+          {currentPage} / {totalPages}
+        </span>
+        <Button variant="outline" size="icon" className="h-8 w-8"
+          disabled={currentPage === totalPages} onClick={() => onOffsetChange(offset + LIMIT)}>
+          <ChevronRight className="h-4 w-4" />
+        </Button>
+      </div>
+    </div>
+  );
+}
 
 const ROLES = [
   { value: "owner", label: "Owner" },
@@ -81,7 +113,11 @@ const StaffPage = () => {
   const navigate = useNavigate();
   const { user: authUser } = useAuth();
   const role = authUser?.role;
-  const [users, setUsers] = useState<User[]>([]);
+  const [staffUsers, setStaffUsers] = useState<User[]>([]);
+  const [staffCount, setStaffCount] = useState(0);
+  const [staffOffset, setStaffOffset] = useState(0);
+  const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [jobs, setJobs] = useState<Job[]>([]);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -95,7 +131,12 @@ const StaffPage = () => {
   const [showDeleted, setShowDeleted] = useState(false);
   const [usernameAvailability, setUsernameAvailability] = useState<"idle" | "checking" | "available" | "taken">("idle");
 
-  // Volunteer state
+  // Volunteer state — its own tab, own pagination, fetched from the same
+  // paginated endpoint with role=volunteer.
+  const [volunteerUsers, setVolunteerUsers] = useState<User[]>([]);
+  const [volCount, setVolCount] = useState(0);
+  const [volOffset, setVolOffset] = useState(0);
+  const [volLoading, setVolLoading] = useState(true);
   const [volDialogOpen, setVolDialogOpen] = useState(false);
   const [volForm, setVolForm] = useState({ ...defaultVolunteerForm });
   const [volSaving, setVolSaving] = useState(false);
@@ -111,16 +152,52 @@ const StaffPage = () => {
     } catch { }
   };
 
-  const loadData = async (deleted = false) => {
+  // Debounce search, otherwise every keystroke re-fetches.
+  useEffect(() => {
+    const t = setTimeout(() => { setDebouncedSearch(search); setStaffOffset(0) }, 400);
+    return () => clearTimeout(t);
+  }, [search]);
+
+  const loadStaff = async (deleted: boolean, offset: number, q: string) => {
     setLoading(true);
     try {
-      const res = await apiFetch(`/users/${deleted ? "?deleted=true" : ""}`);
-      if (res.ok) setUsers(await res.json().then((d) => Array.isArray(d) ? d : []));
+      const params = new URLSearchParams({ deleted: String(deleted), offset: String(offset), limit: String(LIMIT) });
+      if (q) params.set("search", q);
+      const res = await apiFetch(`/users/staff?${params}`);
+      if (res.ok) {
+        const json = await res.json();
+        setStaffUsers(json.results ?? []);
+        setStaffCount(json.count ?? 0);
+      }
     } catch { }
     finally { setLoading(false); }
   };
 
-  useEffect(() => { loadData(showDeleted); loadJobs(); }, [showDeleted]);
+  const loadVolunteers = async (deleted: boolean, offset: number) => {
+    setVolLoading(true);
+    try {
+      const params = new URLSearchParams({ deleted: String(deleted), role: "volunteer", offset: String(offset), limit: String(LIMIT) });
+      const res = await apiFetch(`/users/staff?${params}`);
+      if (res.ok) {
+        const json = await res.json();
+        setVolunteerUsers(json.results ?? []);
+        setVolCount(json.count ?? 0);
+      }
+    } catch { }
+    finally { setVolLoading(false); }
+  };
+
+  // loadData(deleted) is kept as the shared refresh point after
+  // create/edit/delete — reloads whichever tab is showing at its current
+  // page rather than resetting both back to page 1.
+  const loadData = (deleted = showDeleted) => {
+    loadStaff(deleted, staffOffset, debouncedSearch);
+    loadVolunteers(deleted, volOffset);
+  };
+
+  useEffect(() => { loadStaff(showDeleted, staffOffset, debouncedSearch); }, [showDeleted, staffOffset, debouncedSearch]);
+  useEffect(() => { loadVolunteers(showDeleted, volOffset); }, [showDeleted, volOffset]);
+  useEffect(() => { loadJobs(); }, []);
 
   useEffect(() => {
     if (!dialogOpen) { setUsernameAvailability("idle"); return; }
@@ -345,9 +422,6 @@ const StaffPage = () => {
     }
   };
 
-  const staffUsers = users.filter((u) => u.role !== "volunteer");
-  const volunteerUsers = users.filter((u) => u.role === "volunteer");
-
   return (
     <DashboardLayout title="Xodimlar">
       <Tabs defaultValue="staff" className="flex-1 min-h-0 flex flex-col">
@@ -359,10 +433,19 @@ const StaffPage = () => {
           <div>
             <TabsContent value="staff" className="mt-0">
               <div className="flex items-center gap-2">
+                <div className="relative">
+                  <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                  <Input
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    placeholder="Qidirish..."
+                    className="h-9 w-48 pl-8"
+                  />
+                </div>
                 <Button
                   size="sm"
                   variant={showDeleted ? "destructive" : "outline"}
-                  onClick={() => setShowDeleted((v) => !v)}
+                  onClick={() => { setShowDeleted((v) => !v); setStaffOffset(0); setVolOffset(0) }}
                 >
                   <UserX className="h-4 w-4 mr-1" />
                   O'chirilganlar
@@ -383,8 +466,8 @@ const StaffPage = () => {
         </div>
 
         {/* ── STAFF TAB ── */}
-        <TabsContent value="staff" className="mt-0 flex-1 min-h-0">
-          <div className="rounded-lg border bg-card h-full overflow-auto">
+        <TabsContent value="staff" className="mt-0 flex-1 min-h-0 flex flex-col">
+          <div className="rounded-lg border bg-card flex-1 min-h-0 overflow-auto">
             <table className="w-full caption-bottom text-sm">
               <TableHeader className="sticky top-0 z-10 bg-card">
                 <TableRow>
@@ -478,11 +561,12 @@ const StaffPage = () => {
               </TableBody>
             </table>
           </div>
+          <Pagination count={staffCount} offset={staffOffset} onOffsetChange={setStaffOffset} />
         </TabsContent>
 
         {/* ── VOLUNTEERS TAB ── */}
-        <TabsContent value="volunteers" className="mt-0 flex-1 min-h-0">
-          <div className="rounded-lg border bg-card h-full overflow-auto">
+        <TabsContent value="volunteers" className="mt-0 flex-1 min-h-0 flex flex-col">
+          <div className="rounded-lg border bg-card flex-1 min-h-0 overflow-auto">
             <table className="w-full caption-bottom text-sm">
               <TableHeader className="sticky top-0 z-10 bg-card">
                 <TableRow>
@@ -493,7 +577,7 @@ const StaffPage = () => {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {loading ? (
+                {volLoading ? (
                   <TableRow>
                     <TableCell colSpan={4} className="h-24 text-center">
                       <Loader2 className="h-5 w-5 animate-spin mx-auto text-muted-foreground" />
@@ -529,6 +613,7 @@ const StaffPage = () => {
               </TableBody>
             </table>
           </div>
+          <Pagination count={volCount} offset={volOffset} onOffsetChange={setVolOffset} />
         </TabsContent>
       </Tabs>
 
