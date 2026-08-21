@@ -208,6 +208,164 @@ didn't trace which mark.py code path produces the miss. Not urgent to chase
 further since the 173-row fix already covers the known extent, but worth
 knowing if the same pattern reappears for lessons marked after today.
 
+### 11. Duplicate teacher-salary payment rows — 3 rows, ~1.5M so'm
+
+Found while checking whether the collection-account ("Inkassatsiya") screen
+counts deleted salary payments (it doesn't — `deleted=False` filter, correct).
+While checking a screen showing the same round amount twice for one teacher,
+found the real pattern: the same real payment recorded **twice** — once via
+v2's own native entry flow (small sequential `id`), once again via a
+sync-from-old-gennis pass (`id` in the hundreds-of-millions to billions range,
+`synced_at` set, `reason='avans'` populated) — landing in
+`gennis_teacher_salary_payment` as two separate rows for the identical amount,
+1-2 days apart.
+
+Checked system-wide (not just the one location the screenshot came from): only
+**4 candidate pairs**, all dated 2026-08-19 to 2026-08-21 (i.e. live/recent,
+not historical). 3 confirmed and fixed:
+
+- **Amirbek Akbaraliyev**, 200,000 so'm — proven via shared `salary_gennis_id`
+  (both rows point at the same underlying salary record, 6 hours apart).
+- **Sardor Ikromov**, 649,188 and 650,000 so'm — non-round amounts, same
+  teacher, 1-2 days apart, both dated 2026-08-19 to 08-21.
+
+Left alone: Ruslan Orifov's 50,000 so'm pair — round number, different
+channel, no shared `salary_gennis_id`; not confident enough to call it a
+duplicate.
+
+Fix: soft-deleted the 3 duplicate rows, recomputed the corresponding
+`gennis_teacher_salary.taken_money`/`remaining_salary` (linear in
+`taken_money`, so just subtracting the duplicated amount and re-deriving
+`remaining_salary` from the existing formula was exact — no other fields
+touched).
+
+**Not resolved**: why duplicates are still being created *after* the
+2026-08-12 freeze date — either old gennis is still receiving live entries
+despite being nominally frozen, or staff are still double-entering payments
+into both systems by habit. Worth flagging to whoever owns the freeze.
+
+### 12. Attendance-delete reversal never decremented present_days/absent_days
+
+Found via a student profile ("Kelgan kunlar" showing 3 when only 2 lessons
+existed live) after asking how the attendance-delete endpoint
+(`DELETE /attendance/records/{id}`, `attendance/history.py`) works. It
+correctly reverses the money (student debt, teacher/assistant salary) when a
+lesson gets deleted, but never touched `present_days`/`absent_days` — so the
+counter kept counting a lesson that no longer existed, drifting further out of
+step with every subsequent deletion.
+
+Scanned for the same pattern platform-wide, scoped to 2026 rows where live
+attendance data actually exists (to exclude legacy pre-v2 rows with no
+baseline to compare against): **27 rows / 17 group-month combinations** — one
+cluster stood out, group 12049 in July with 6 students all showing the
+identical 14→13 drift, almost certainly one shared lesson-date deletion for
+the whole group at once rather than 6 independent single-student deletes.
+
+Of those 27, **4 also had a stale-counter side effect**: the deleted lesson's
+reversal had correctly reduced `total_debt`, but since `payment` (money
+already received) is deliberately never touched by the reversal, the excess
+sat as a negative `remaining_debt` instead of clean zero. Corrected those 4 by
+moving the surplus into `gennis_student_credit` and zeroing `remaining_debt` —
+**note**: this pattern was later found to be unnecessary churn, not a real
+bug — see §13's note on `GennisStudentCredit`.
+
+**Code fix, deployed** (`history.py`, commit `f9cf0df`): `_reverse_lesson_charge`
+now decrements `present_days`/`absent_days` (whichever the deleted record
+was), matching what `mark.py` increments on mark. Docstring also corrected —
+it previously claimed the student-charge/salary reversal was "exact"; it
+isn't, for the same reason black-salary/fine reversal was already documented
+as best-effort (both re-derive from the group's *current* config, not what
+was in effect when the lesson was originally marked).
+
+### 13. mark.py root cause for the discount-shortfall bug — found and fixed
+
+The §10 fix (173 rows) cleaned up the historical backlog but didn't touch the
+cause. Traced it this session: `_update_history_debt_rows` in `mark.py`
+**accumulated** each lesson's charge (`total_debt = total_debt +
+effective_charge`) using whichever `GennisStudentCharity` discount was
+standing at the exact moment *that one lesson* got marked. Nothing ever
+revisited already-accumulated lessons — so when a discount got granted
+mid-month, lessons marked before that moment kept their old (undiscounted)
+contribution forever. Confirmed live-recurring on a lesson marked *after* the
+§10 fix (Kamola Abdulazizova's July Mt01A1-03 row: 11 of 12 lessons
+discounted, 1 not, ~11 so'm off).
+
+**Fix, deployed** (commit `2b80f2c`): `_update_history_debt_rows` now
+recomputes `total_debt`/`total_discount` from scratch every time any lesson
+in that group/month gets marked — `(present_days + absent_days) × current
+rate` — instead of accumulating a delta. A discount change now retroactively
+fixes the whole month automatically the next time any lesson in it is
+touched, instead of only affecting lessons marked afterward.
+
+**Urgent side effect this fix created**: it depends on `present_days`/
+`absent_days` being accurate, since it multiplies by them directly. Scanning
+for rows where that counter didn't match live attendance (same class of check
+as §12, but checking understatement, not just staleness-from-deletion) turned
+up **27,658 rows platform-wide** — most off by 1 (today's lesson not yet
+reflected, harmless), but thousands showing `present_days=0` despite a fully
+attended, fully paid month underneath (money already correct, only the
+counter wrong — pre-existing, unrelated to today's changes, just newly
+dangerous given the new recompute logic). Any of those getting one more
+lesson marked would have collapsed a correct `total_debt` down to almost
+nothing. Ran a single bulk backfill — `present_days`/`absent_days` set to
+match live `gennis_lesson_attendance` counts, no money fields touched — across
+all 27,658 rows before this could bite. Verified zero mismatches remain.
+
+**Attempted and deliberately not applied**: a retroactive recompute of
+existing open (unpaid) rows using the same exact formula, to fix the backlog
+missed by §10's decomposition-based detection. Sized it at 598 open rows with
+an active charity, but the numbers don't support blind recompute even
+restricted to the current 2 months — many rows show the *discount itself*
+having changed (added, removed, or resized) between when lessons were marked
+and now, which the aggregate total can't distinguish from "lesson missed its
+discount." Recomputing with "current discount" would retroactively erase
+legitimately-earned-at-the-time discounts on some rows while correctly fixing
+others, with no way to tell them apart from the aggregate alone. Left
+untouched — the live fix is safe (always uses whichever discount is genuinely
+current at the moment each lesson is (re-)touched); a blind historical
+recompute is not.
+
+**Correction to §12's methodology**: moving a negative `remaining_debt` into
+`GennisStudentCredit` (done for 5 rows total between §12 and the original
+Kamola/Gulnora checks) turned out to be unnecessary — `mark.py` already has an
+explicit comment documenting a real prior production incident from exactly
+this double-write pattern (debt tracked in both `remaining_debt` and
+`GennisStudentCredit` independently, drifting out of sync). A negative
+`remaining_debt` on one row is the *correct* state — it's the single source of
+truth for debt and nets naturally against other rows via `effective_balance()`
+and `debt_total = sum(remaining_debt)`, which every debt-facing screen already
+uses. Checked the algebra: moving the surplus into credit and zeroing the row
+is balance-neutral for the final displayed number, so those 5 rows aren't
+wrong today — but the pattern shouldn't be repeated, and `_reverse_lesson_charge`'s
+docstring now says so explicitly.
+
+### 14. attended_days double-counted present_days + scored_days — platform-wide, 2022-2026
+
+Found via a student balance screen showing "24 kelgan kunlar" for a group
+capped at 13 lessons/month. Database was correct (`present_days=12`); the API
+field (`students/profile.py`) computed `attended_days = present_days +
+scored_days`, a formula ported from a (mistaken) assumption that old gennis
+kept the two mutually exclusive — a graded lesson landing in `scored_days`
+*instead of* `present_days`. Checked old gennis's own admin screen directly
+(screenshots from the student in question): its "Kegan kunlar" column equals
+"Kunlar" with no addition at all — the mutually-exclusive assumption was never
+true even in old gennis, so this wasn't a faithful port, just a mistake baked
+into v2 from the start. `mark.py` itself never touches `scored_days` — it
+always increments `present_days` for every attended lesson regardless of
+grading — so the two counters overlap rather than partition, and adding them
+double-counted (sometimes far worse than 2× — one row showed
+`present_days=4, scored_days=19` displaying as 23).
+
+Scope: **28,546 rows / 5,726 distinct students**, 2022 through 2026 — this
+wasn't a recent or isolated glitch.
+
+**Fix, deployed** (`profile.py`, commit `c0c2ff4`): `attended_days` is now
+just `present_days`. Pure display-formula fix — no database rows touched,
+`total_debt`/`payment`/`remaining_debt` were never affected by this bug, and
+since the fix lives in the API response computation rather than stored data,
+it corrected all 5,726 students' displays the moment it deployed, no backfill
+needed.
+
 ## Lesson learned, applied going forward
 
 Every aggregate/batch approach tried today had a real error rate until
