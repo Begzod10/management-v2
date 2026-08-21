@@ -1,14 +1,28 @@
+import re
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import List
-from datetime import date
+from datetime import date, datetime
+from pydantic import BaseModel, EmailStr, Field
 from app.database import get_db
 from sqlalchemy.orm import joinedload
 from app.models import User, Section, Project, ProjectMember, SectionMember, SalaryMonth
 from app.schemas import UserCreate, UserUpdate, UserOut, UserProfileOut, UserProjectOut, UserSectionOut
 from app.core.security import get_password_hash
+from app.dependencies import require_roles
 
 router = APIRouter(prefix="/users", tags=["Users"])
+
+ADMIN_ROLES = ("owner", "manager")
+
+
+class AdminEmailChange(BaseModel):
+    new_email: EmailStr
+
+
+class AdminUsernameChange(BaseModel):
+    new_username: str = Field(..., min_length=3, max_length=100)
 
 
 @router.post("/", response_model=UserOut, status_code=201)
@@ -140,6 +154,111 @@ def get_user(user_id: int, db: Session = Depends(get_db)):
     profile.projects = [UserProjectOut.model_validate(p) for p in projects]
     profile.sections = [UserSectionOut.model_validate(s) for s in sections]
     return profile
+
+
+# ── Admin: check/change email & username by user_id ────────────────────────────
+# Unlike /auth/check-email, /auth/change-email etc. (self-service, acting on the
+# authenticated user), these act on an arbitrary user_id and require an
+# owner/manager role — no password confirmation from the target user needed.
+
+@router.get("/{user_id}/check-email")
+def admin_check_email_availability(
+        user_id: int,
+        email: EmailStr,
+        db: Session = Depends(get_db),
+        _: User = Depends(require_roles(*ADMIN_ROLES)),
+):
+    """Admin: check whether an email is free to assign to this user."""
+    exists = db.query(User).filter(
+        User.email == email,
+        User.id != user_id,
+        User.deleted == False,
+    ).first() is not None
+    return {"user_id": user_id, "email": email, "available": not exists}
+
+
+@router.get("/{user_id}/check-username")
+def admin_check_username_availability(
+        user_id: int,
+        username: str,
+        db: Session = Depends(get_db),
+        _: User = Depends(require_roles(*ADMIN_ROLES)),
+):
+    """Admin: check whether a username is free to assign to this user."""
+    username = username.strip()
+    if not re.match(r'^[a-zA-Z0-9_.]+$', username):
+        raise HTTPException(
+            status_code=400,
+            detail="Username may only contain letters, numbers, underscores, and periods"
+        )
+    exists = db.query(User).filter(
+        User.username == username,
+        User.id != user_id,
+        User.deleted == False,
+    ).first() is not None
+    return {"user_id": user_id, "username": username, "available": not exists}
+
+
+@router.patch("/{user_id}/email")
+def admin_change_email(
+        user_id: int,
+        data: AdminEmailChange,
+        db: Session = Depends(get_db),
+        _: User = Depends(require_roles(*ADMIN_ROLES)),
+):
+    """Admin: change a user's email. No password confirmation required."""
+    user = db.query(User).filter(User.id == user_id, User.deleted == False).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    existing = db.query(User).filter(
+        User.email == data.new_email,
+        User.id != user_id,
+        User.deleted == False,
+    ).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="Email already in use")
+
+    user.email = data.new_email
+    user.is_verified = False
+    user.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(user)
+    return {"message": "Email changed successfully", "user_id": user.id, "email": user.email}
+
+
+@router.patch("/{user_id}/username")
+def admin_change_username(
+        user_id: int,
+        data: AdminUsernameChange,
+        db: Session = Depends(get_db),
+        _: User = Depends(require_roles(*ADMIN_ROLES)),
+):
+    """Admin: change a user's username."""
+    user = db.query(User).filter(User.id == user_id, User.deleted == False).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    new_username = data.new_username.strip()
+    if not re.match(r'^[a-zA-Z0-9_.]+$', new_username):
+        raise HTTPException(
+            status_code=400,
+            detail="Username may only contain letters, numbers, underscores, and periods"
+        )
+
+    existing = db.query(User).filter(
+        User.username == new_username,
+        User.id != user_id,
+        User.deleted == False,
+    ).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="Username already taken")
+
+    user.username = new_username
+    user.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(user)
+    return {"message": "Username changed successfully", "user_id": user.id, "username": user.username}
 
 
 @router.patch("/{user_id}", response_model=UserOut)
