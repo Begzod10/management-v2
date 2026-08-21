@@ -1,5 +1,5 @@
-# Environment
-.env
+# Environment (backend secrets — root only; frontend/.env is public config, tracked)
+/.env
 
 # Python
 __pycache__/
