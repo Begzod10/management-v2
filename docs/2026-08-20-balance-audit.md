@@ -366,6 +366,102 @@ since the fix lives in the API response computation rather than stored data,
 it corrected all 5,726 students' displays the moment it deployed, no backfill
 needed.
 
+### 15. Duplicate student payment deleted alongside its original — Asadbek O'ktamov, and confirming the payment-reversal engine is correct
+
+Reported as a live discrepancy: student profile showed `-314,379` in one tab
+and `-714,379` in another. Traced to two identical `400,000` click payments
+logged 2 minutes apart (`gennis_student_payment` ids 61518, 61525) — a
+double-click duplicate. Both got deleted, when only the duplicate should
+have been — the original, legitimate payment went with it.
+
+`reverse_payment()` (`services/payments.py`) restores debt "newest-month-first"
+by design (it has no per-payment ledger of which row a payment actually paid
+off, so it can't target just the deleted payment's own contribution) —
+deleting the August payment walked backward, drained July's `331,770`
+first, then reached into **June** and pulled `68,230` out of a row that had
+been closed and fully paid for weeks, using money that payment never touched.
+
+Verified this is the *engine working correctly*, not a bug in the reversal
+itself: replayed the student's entire debt history from scratch — all 30
+months' `total_debt`, oldest-first, filled with the current (post-deletion)
+real-payment total of `7,603,000` — and it landed on the exact same numbers
+already sitting in the database, to the so'm. Payments are pooled, not
+tied to a specific debt row, so removing any amount from the pool has to make
+the paid watermark recede from the newest month backward to stay consistent;
+that's what happened. The only actual problem was the accidental double
+deletion, not the mechanics of reversing it.
+
+**Fix, applied**: re-added the one legitimate `400,000` payment through the
+real `apply_payment()` (so credit reconciliation and teacher black-salary
+activation ran normally, not a raw SQL shortcut) — `scripts/fix_asadbek_224322.py`.
+This surfaced a second, separate bug (§16) while investigating: the June row's
+`total_debt` itself was wrong before any of this happened.
+
+### 16. Group price never versioned — already-billed months silently repriced at today's rate — 567 rows, ~40 groups, 338 credit reconciliations
+
+While explaining §15's June shortfall, the student pushed back: attendance
+data for that month is identical in old gennis and v2, so the debt figures
+should be too. They weren't — old gennis's frozen (pre-2026-08-12) snapshot
+showed `153,845` for 5 marked lessons (400,000 ÷ 13/lesson); v2 showed
+`161,535` for the identical 5 lessons (420,000 ÷ 13/lesson). `gennis_group`
+confirms the group's price changed after June ended, but the row's
+`total_debt` reflected the new rate anyway.
+
+Root cause: `_update_history_debt_rows` (rewritten in §13 to recompute
+`total_debt` from scratch on every touch, specifically so a discount change
+would retroactively apply to the whole month) always read the group's
+*current live* `price`, with no memory of what the price was when that
+calendar month was actually billed. Any already-closed month that got
+touched again later — a backdated or re-marked lesson — silently repriced
+its **entire** month at today's rate, not just the newly-touched lesson.
+§13's fix solved the discount-staleness bug and introduced this one as a
+side effect: discount is *supposed* to be retroactive within the month;
+price is not.
+
+**Scope, found by comparing v2 against old gennis's frozen numbers**
+(student's own gennis_id/group gennis_id, same present+absent day count on
+both sides used as a shared divisor to isolate rate differences):
+
+| Scan | Rows | Coverage |
+|---|---|---|
+| Jun/Jul 2026, discount-free rows only | 145 (+1 manual: Asadbek) | 38 groups |
+| Widened: all months 2023–Jul 2026, discount-matched rows included | 421 | 40 groups |
+| **Total corrected** | **567** | **338 credit reconciliations** |
+
+All drift was confined to **March–July 2026** — nothing in 2023-2025, and
+August (in-progress) wasn't scanned. Net debt correction across all batches:
+students were net over-billed (`-1.77M` then `-7.04M` so'm as scope widened);
+338 of the 567 rows had already been paid in full at the inflated price, so
+those surpluses moved into `GennisStudentCredit`, same reasoning as §13's
+correction.
+
+**Fix, deployed** (commit `94b76ec`): added a nullable `price_per_lesson`
+column to `gennis_attendance_history_student`. `_update_history_debt_rows`
+now stamps it from the live price the *first* time a row is ever touched,
+then reuses that locked value on every later recompute of the same row — a
+group price change only affects months billed after the change. Discount
+stays dynamic/self-healing on purpose, unchanged from §13.
+
+**Data fix, applied**: `scripts/fix_price_drift_batch.py`, driven by a JSON
+list of `{student, group, month, old_total_debt, new_price_per_lesson}`
+built from the old-gennis comparison. Only `total_debt`/`price_per_lesson`/
+`remaining_debt`/`status` were touched — `payment` was left alone, so no
+FIFO payment-cascade replay was needed (unlike §15's case, which required
+one because a *payment* was being restored, not just a debt figure
+corrected). Verified after each batch: `remaining_debt < 0` row count held
+steady at 21 (the pre-existing, already-flagged cluster — see Open below),
+confirming nothing new broke.
+
+**Left open, not auto-fixed**:
+- **64 rows** where the discount amount itself also differs between old
+  gennis and v2 (charity granted or changed since the freeze) — the
+  aggregate total can't distinguish "price drifted" from "discount
+  legitimately changed" for these, same reasoning as §13's rejected blind
+  recompute. Needs individual review.
+- Rows outside the students/groups the old-gennis comparison could reach
+  (no frozen counterpart, or ambiguous multi-row matches) were skipped
+  entirely rather than guessed at.
+
 ## Lesson learned, applied going forward
 
 Every aggregate/batch approach tried today had a real error rate until
@@ -381,6 +477,9 @@ always verify those individually.
 
 ## Open for next session
 
+- **§16's 64 discount-differs rows** — group price drift and a discount
+  change both landed on the same row, so the aggregate can't be auto-fixed;
+  needs one-by-one review against old gennis.
 - **269 students remaining in the negative-gap list** (−22.3M, corrected
   formula). Two checked so far: one genuine bug (like 221855's phantom
   credit), one "old tangled history" case with no clean row to attribute the
