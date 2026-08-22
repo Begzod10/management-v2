@@ -452,15 +452,219 @@ corrected). Verified after each batch: `remaining_debt < 0` row count held
 steady at 21 (the pre-existing, already-flagged cluster — see Open below),
 confirming nothing new broke.
 
-**Left open, not auto-fixed**:
+**Left open, not auto-fixed at the time**:
 - **64 rows** where the discount amount itself also differs between old
   gennis and v2 (charity granted or changed since the freeze) — the
   aggregate total can't distinguish "price drifted" from "discount
   legitimately changed" for these, same reasoning as §13's rejected blind
-  recompute. Needs individual review.
+  recompute. Needs individual review. (Resolved in full — see §17.)
 - Rows outside the students/groups the old-gennis comparison could reach
   (no frozen counterpart, or ambiguous multi-row matches) were skipped
   entirely rather than guessed at.
+
+### 17. The 64 discount-differs rows — resolved in full, no batch formula, one by one
+
+§16 left these 64 open because a single aggregate comparison can't tell
+"price drifted" apart from "discount legitimately changed since the
+freeze" — both move the same total_debt number. Went through all 64
+individually instead of guessing at a formula. None were left to chance;
+each was placed in a bucket only after a specific, checkable reason:
+
+- **40 — self-healing discount, not a bug.** `old_total_debt + old_discount
+  − v2's current discount` (the historically-correct price recombined with
+  whatever charity is standing on the row *today*) already equalled what
+  was stored. This is §13's discount self-healing working exactly as
+  designed — a charity changed since the freeze and v2 correctly
+  re-applied it. Nothing to touch.
+- **4 — stale old-gennis row, not a bug.** Old's number for that month was
+  byte-identical (`total_debt` *and* `total_discount`) to its own *previous*
+  month — the tell that old-gennis simply stopped syncing partway through
+  and isn't real ground truth for that row. v2 was correct.
+- **4 fixed — the same price-lock bug as §16, just missed by the automated
+  scan.** Ruxshona Rahimboyeva, group 604 (E26A2-05), March–June: her rows
+  were consistently priced at 28,000/lesson while every other student in
+  the same group correctly paid 27,692/lesson (confirmed via multiple
+  cross-students) — she landed in the discount-diff bucket only because her
+  discount also happened to differ, so §16's discount-free scan skipped
+  her. Corrected the same way as §16's batch: `11,704` so'm moved to
+  credit across the 4 rows.
+- **2 — false positive, v2 verified correct.** Jayna Elesova (group 548,
+  July): her own 6-month track record is self-consistent at 30,769/lesson
+  and July matches that rate exactly with her current discount; old's
+  number fits nothing in her own history. Shoxrux Tilavoldiyev (group 838,
+  July): v2's total matches the confirmed group rate for a full 13-lesson
+  month; old's much lower number only makes sense if old captured 7 of
+  those 13 lessons — a partial-month snapshot, not ground truth.
+- **9 — plain ±1 attendance-count drift, not a bug.** Tested whether old's
+  number fits *any* nearby day-count at the group's confirmed rate, and 9
+  did: old computed for one fewer (or one more) day than v2 currently has.
+  This is the same already-documented closed-backlog drift from the
+  migration period (see `project_gennis_cutover` — old and v2 independently
+  tracked the tail end of some months slightly differently), unrelated to
+  price or discount. v2 is live/authoritative; old is frozen. No fix.
+  (Shirin Ismoilova, Charos Nortojiyeva, Marjona Abduganiyeva, Mubina
+  Keldiboyeva [July], Robiya Altay [group 902], Fariza Baxromova [groups
+  920 & 911 — same 1-day drift explains why both showed identical diffs],
+  Mexroj Holikulov.)
+- **3 — false positive, verified against the raw per-lesson attendance
+  log.** `gennis_lesson_attendance` is the single most authoritative source
+  available (the actual dated record, not a derived total). Asliya
+  Abdushokirova's log showed exactly 8 June lesson-days and 1 July
+  lesson-day for group 726 — matching v2's `present_days` exactly and
+  contradicting old's much higher implied day-counts outright. Shodiyona
+  Muhammadova's log confirmed 2 June lesson-days for group 413; recomputing
+  from scratch (price, her 120,000 charity, 2 lessons) landed within 3
+  so'm of the stored value. v2 correct in both cases.
+- **2 fixed — a live, individual instance of §13's original
+  accumulation bug.** Robiya Altay (group 249, July) and Jasur Solmetov
+  (group 920, July) both had `total_debt` values that fit no single
+  uniform rate under any (total_lessons, discount_lessons) combination —
+  confirmed by brute-forcing every reasonable parameterization
+  computationally, all failing. Both rows predate §13's fix (`price_per_lesson`
+  was still `NULL` on both), so they were still running the *old*
+  accumulate-per-lesson-at-whatever-discount-was-standing formula. Testing
+  a mixed-rate split confirms it: Robiya's 5 lessons decompose as 1 at full
+  price + 4 at the discounted rate (within 13 so'm of stored); Jasur's 14
+  as 2 full + 12 discounted (within 12 so'm). Both rows are closed and were
+  never re-touched after §13 shipped, so they never got the chance to
+  self-heal. Corrected to the uniform-discount value the current formula
+  would produce — `148,075` (was `151,523`) and `280,000` (was `284,602`)
+  — with the resulting surplus (`3,448` and `4,602`) moved to credit.
+
+All 64 accounted for; nothing left open from this list.
+
+### 18. Attendance-delete never decremented the day-counter unconditionally — found via a live billing complaint
+
+A student's debt tab showed 8 billed lesson-days for August; the live
+attendance log for the same month showed only 3. `8 × 27,692 (the
+confirmed group rate) = 221,536` — exactly the row's `total_debt`. Temur
+Sobirjonov (224526) was being billed for 5 lesson-days that had been
+deleted, not lessons that happened.
+
+Root cause: `_reverse_lesson_charge` (`history.py`) had the
+`present_days`/`absent_days` decrement nested inside `if group.price > 0`
+and, one level deeper, `if effective_charge > 0`. Deleting a lesson in a
+free group, or one whose discount fully offset the price, silently skipped
+the decrement entirely — the day-counter kept counting a lesson
+`gennis_lesson_attendance` no longer had, and (if the group *did* have a
+price) inflated `total_debt` for lessons never actually billed.
+
+**Fix, deployed** (commit `83e1f2f`): the decrement now runs unconditionally,
+before and independent of the price-gated block. Temur's row corrected
+directly to match the log (`present_days=3, absent_days=0`,
+`total_debt=83,076`).
+
+**Scope, platform-wide scan** (`present_days + absent_days` on a row versus
+the actual count of matching `gennis_lesson_attendance` rows, June–August
+2026): **28 rows**.
+
+- **1 fixed** — Temur, above.
+- **4 fixed** — real, already-paid money, zero raw log for that specific
+  month (a partial-month gap, same mechanism as Temur's, just caught by
+  total absence of the log rather than a partial mismatch). `total_debt`/
+  `present_days`/`absent_days` zeroed, the orphaned payment moved to
+  credit: Adibaxon Arziyeva `123,080`, Ismoil Abduraximov `29,615`, Shoxrux
+  Tilavoldiyev `9,227`, Robiya Altay `3,460`.
+- **1 fixed, cosmetic only** — Jabbor Samandarov, a one-off individually-
+  billed ("SH-Ind") group created and paid within the same 10-minute
+  window by an admin, with no lesson-attendance log at all. The stored
+  `total_debt` (`230,769`) itself divides cleanly by 3 lessons at the
+  group's confirmed rate, not the 4 `present_days` on the row — corrected
+  `present_days` 4→3 to match what was actually billed. Zero financial
+  impact; money was already correctly settled either way.
+- **~19 — harmless, `total_debt=0`, no fix needed.** Traced one (a student
+  who transferred groups mid-month) to a leftover zero-charge row created
+  under the new group before real billing started there — cosmetic, no
+  money involved, same pattern in the rest.
+- **3 — folded into already-known clusters, not new findings.** Two
+  (students in group 12200/Tarix01) turned out to be the same mechanism as
+  §19 below; one is Davlatbek Musulmonov's already-documented tangled case.
+
+### 19. 21-row `remaining_debt < 0` cluster — 18 of 21 resolved
+
+This cluster (Tarix01/group-12200 and a handful of others) has sat in
+"Open for next session" since before today, flagged only as "needs
+individual review." Root-caused today, prompted by the overlap found in
+§18: `_reverse_lesson_charge` correctly reverses `total_debt` when a
+lesson is deleted, but was never designed to reclaim a `payment` that had
+already been applied against that debt. When an *entire month's* worth of
+lessons for a group got deleted — an enrollment cancelled or reversed
+after the fact, rather than one lesson corrected — `total_debt` correctly
+went to 0, but the `payment` that had been validly applied against it
+stayed stranded on the now-empty row instead of becoming available credit.
+Because every debt-facing view sums only `remaining_debt > 0`, that
+stranded money was simply invisible — not wrong in a way that overstated
+anyone's debt, but real, already-paid money that wasn't counting toward
+the family's balance anywhere.
+
+Verified for every row before moving anything: summed `payment` across
+each student's *entire* attendance history and compared against their real
+`gennis_student_payment` ledger total. In every case the gap matched (often
+exactly, sometimes exactly offset by an already-existing credit balance),
+confirming the money was real and simply misplaced, not fabricated.
+
+**Fixed — 18 rows, payment moved from the row to `GennisStudentCredit`:**
+
+| Student | Amount |
+|---|---|
+| Shoxruza Baxtyorova | 384,995 |
+| Jasmina Durdibayeva | 384,995 |
+| Mamur Umaralieyav | 384,995 |
+| Diyorbek Mirzaxmatov | 384,995 |
+| Sardor Mingiboyev | 384,995 |
+| MuhammadAziz Sultonov | 384,995 |
+| Nodir Imomrasulov | 414,610 |
+| Javohir Karimboyev | 261,527 |
+| Mexruza Karimova | 236,920 |
+| Robiya Altay | 130,757 |
+| Azizbek Negmatullayev | 88,845 |
+| Javlon To'ychiboyev | 110,769 |
+| Diyorbek Xavazmatov | 33,076 |
+| Ibroxim Nigmatullayev | 24 |
+| Aslbek Asrorov | 133,841 |
+| Sogdiyana Norxajayeva | 12 |
+
+16 of these sat in group 12200 (Tarix01); the remaining 2 were the same
+mechanism in unrelated groups. `remaining_debt < 0` row count: 21 → 3.
+
+**Left open — 3 rows, all Davlatbek Musulmonov (231853, gennis_id 15385),
+already named individually below.** His case doesn't fit this mechanism:
+summed across his whole account, his real payment ledger (`1,580,000`) is
+*exactly double* his attendance-history payment sum (`790,000`) — a clean
+2.0× ratio, not a stray stuck payment, and his existing credit balance is
+`0` (not absorbing the gap the way it did for the 18 above). That ratio
+points at duplicate student registration — his money likely split across
+two `gennis_student` records — rather than this bug. Moving his stranded
+amount to credit would still leave him short by the same amount, so it
+wouldn't actually resolve anything; left for the duplicate-registration
+merge work (see Open below) instead.
+
+### 20. Credit reconciliation could double-credit the same gap on repeated runs
+
+Found while designing §19's fix: the credit-reconciliation logic itself
+(in both `mark.py`'s `_update_history_debt_rows` and `history.py`'s
+`_reverse_lesson_charge`) credits the *entire* current gap between
+`total_debt` and `payment` every time it runs, but never reduces `payment`
+to reflect what it just moved to credit. Either function can run
+repeatedly against the same row — a month's lessons deleted one at a time,
+or more lessons marked across an ongoing month — and each run re-compares
+the same still-high `payment` against a newly-lower `total_debt`,
+re-crediting the same already-reconciled gap on every subsequent run.
+
+Concretely: a fully-paid 60 so'm row (2 lessons × 30) with both lessons
+deleted one at a time credits 30 after the first deletion, then 60 more
+after the second (since `payment` is still 60 for that second comparison)
+— 90 credited total instead of the correct 60.
+
+None of the 18 rows fixed in §19 were double-credited by this — they were
+corrected directly from verified real numbers, not by letting the buggy
+code run again — but the bug itself was live and would have kept
+corrupting future occurrences of the same pattern.
+
+**Fix, deployed** (commit `b5dbd3d`): both blocks now reduce `payment` by
+the same surplus moved to credit, so a row's payment baseline only ever
+reflects what its current `total_debt` actually justifies, however many
+times it gets recomputed or reversed.
 
 ## Lesson learned, applied going forward
 
@@ -477,9 +681,15 @@ always verify those individually.
 
 ## Open for next session
 
-- **§16's 64 discount-differs rows** — group price drift and a discount
-  change both landed on the same row, so the aggregate can't be auto-fixed;
-  needs one-by-one review against old gennis.
+- **§16's 64 discount-differs rows** — resolved in full, see §17. Nothing
+  left open from this item.
+- **Davlatbek Musulmonov (231853)** — see §19's write-up: his real payment
+  ledger is exactly 2× his attendance-history payment sum, a clean ratio
+  that points specifically at duplicate student registration rather than
+  a stuck-payment or price bug. Worth using as the first test case when the
+  295-cluster merge work below starts — the ratio should make it easy to
+  confirm which second `gennis_student` record his other half of the money
+  is sitting under.
 - **269 students remaining in the negative-gap list** (−22.3M, corrected
   formula). Two checked so far: one genuine bug (like 221855's phantom
   credit), one "old tangled history" case with no clean row to attribute the
