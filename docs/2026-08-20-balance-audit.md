@@ -666,6 +666,156 @@ the same surplus moved to credit, so a row's payment baseline only ever
 reflects what its current `total_debt` actually justifies, however many
 times it gets recomputed or reversed.
 
+### 21. Davlatbek Musulmonov resolved — not duplicate registration, two separate gaps
+
+§19 flagged his exact 2.0× ratio (real payments `1,580,000` vs
+attendance-history payment sum `790,000`) as pointing at duplicate student
+registration. Checked directly: no duplicate found. Searched `gennis_student`
+by his phone, parent_phone, name+surname, and birth_date — the one same-phone
+hit is a different person (a sibling, different name/birth_date/parent_phone).
+The 2.0× was a coincidence of two separate, real gaps landing on the same
+number by chance, not evidence of a split record.
+
+**Gap 1 (790,000) — his own instance of §19's bug.** His 3 negative rows
+(`74253`, `74254`, `72676`) sum to exactly `790,000`, matching payment
+`60196` (790,000 click, 2026-07-21). Fixed the same way as the other 18 in
+§19: verified against his real ledger, capped `payment` to 0 on the 3 rows,
+moved 790,000 to credit.
+
+**Gap 2 (790,000) — a payment never allocated at all.** Payment `58092`
+(790,000 cash, paid 2026-06-03) has no matching entry anywhere — not on any
+attendance-history row, not in credit. Both of his payments have `synced_at`
+weeks after their real `paid_date` (58092: paid Jun 3, synced Aug 13; 60196:
+paid Jul 21, synced Aug 4), and all 5 of his attendance-history rows show
+`synced_at ≈ Aug 20` — created *after* both payments. Gap 1's three rows sum
+to *exactly* one full payment, which only makes sense if some backfill/sync
+process wrote raw payment amounts directly onto rows rather than running them
+through `apply_payment`'s allocation logic — and for this second payment,
+that process apparently never ran at all. Distinct from every other bug found
+today: this money was never applied anywhere, not stuck after being applied.
+
+Since he owes nothing (`total_debt=0` on all 5 rows), the fix is the same
+`apply_payment` would have produced against a debt-free account: the full
+790,000 moved directly to credit.
+
+**Final state, verified**: `sum(row payments) + credit = 0 + 1,580,000 =
+1,580,000`, matching his real payment ledger exactly. Fully resolved, no
+debt owed, nothing left open for him.
+
+### 22. Self-correction: today's own §17 batch fix had §20's bug
+
+Found while triaging the 269-student negative-gap list (below). The
+421+145-row price-drift batch fix (§16, `fix_price_drift_batch.py`) ran
+*before* §20's cumulative-over-crediting bug was found and fixed — so it
+carried the same flaw: it moved surplus to credit without capping
+`payment`. Any of those rows touched again by live attendance-marking
+afterward (before `b5dbd3d` deployed) would get double-credited on the next
+recompute.
+
+**348 rows actually hit this** (~11M so'm double-counted) — confirmed
+credit was already correct from the original §16 fix, then capped
+`payment = total_debt` on all 348 (balance-neutral: only removes the
+duplicate count, doesn't touch credit or total_debt). This moved the
+negative-gap list from a corrupted 451 students / −32M back down to
+299 / −22.79M, in line with this doc's original 269/−22.3M scope.
+
+Also fixed, unrelated to today: **39 pre-existing `payment > total_debt`
+rows**, same "stuck payment on an invalid row" signature as §19's Tarix01
+cluster. Verified each against the student's real payment ledger before
+capping `payment` and moving the difference to credit — balance-neutral for
+the gap formula (doesn't change `total_paid`), so it didn't move the
+299/−22.79M number, but was a correctness fix worth doing regardless.
+
+Platform-wide after both cleanups: `remaining_debt < 0` count = 0,
+`payment > total_debt` count = 0.
+
+### 23. 269/299 negative-gap list — triaged, no batch shortcut found
+
+Sampled 3 students from the list (Shahzodabonu Sanjarova `226413`,
+Dilmurod Abdulahadov `216255`, Shahzoda Aliyeva `216174`). All 3: real
+payment ledger matches old-gennis exactly — the gap is entirely internal to
+v2's own debt-row bookkeeping, not a payment problem. Same "old tangled
+history" class as 216745/222918/232033/Davlatbek (before §21): payments
+fall short of what's shown as applied, spread across many already-closed
+rows, no single row to attribute it to.
+
+**New lead, not resolved:** Sanjarova (226413) carries two attendance-history
+groups (B44A102, C44A202 — different teachers, different prices) showing
+*identical* `present_days` and `total_debt` for every month from Sep 2024
+through Sep 2025, despite `gennis_student_group` showing no current
+overlapping enrollment in both. Duplicate-shaped, but doesn't self-explain
+the way Davlatbek's ratio did. Possibly connects to §24's cluster work —
+worth checking first if that starts before this list gets picked up again.
+
+No fast pattern-match fix found across the 3 sampled — recommend the next
+pass budget real per-student time (old-gennis + raw-log cross-check, same
+method as §17-19) rather than expecting a batch shortcut. 3-for-3 sampled
+were genuine tangled history, not bugs, so that's the expected outcome
+going in, not evidence the list can be dismissed as unfixable — just that
+it needs the slow method.
+
+### 24. 295 duplicate-registration clusters — scoped, not executed
+
+**Could not reproduce "295" exactly.** Two clustering strategies against
+`gennis_student` gave different counts: name+surname only (case-insensitive,
+requiring overlapping `gennis_student_payment` date ranges) → 109 clusters,
+~625.6M so'm; name+surname+phone (stricter) → 37 clusters, ~148.3M so'm. The
+original query's exact matching logic isn't recoverable from this doc alone.
+Doesn't change what needs to happen next — the phenomenon is real regardless
+of which count is "correct."
+
+**Top clusters hand-verified:**
+- Robiya Ergasheva — 4 `gennis_student` records; 2 (`220875`, `223703`)
+  share phone `975458582` with clearly overlapping payment date ranges,
+  summing to `12,997,000` — matches this doc's `12.9M` figure exactly.
+  Confirmed genuine. The other 2 records (different phones) unverified.
+- Sevinch Bahromboyeva — exactly 2 records, identical phone. Clean,
+  unambiguous duplicate.
+- Gulzira Abdumannopova — 3 records; 2 share phone+parent_phone exactly
+  (clean pair); the 3rd has a different phone — could be an updated
+  contact or a coincidental name collision, unresolved without
+  father_name/birth_date comparison.
+- Akbarshox To'shpo'latov — not checked (apostrophe in the surname broke
+  the query, not fixed).
+
+Takeaway: phone match on top of name match is low-false-positive for
+2-record clusters; 3+-record clusters need an extra signal (father_name,
+birth_date) before assuming every record belongs together.
+
+**Merge design (spec only, nothing executed):**
+
+21 tables carry a `student_id` foreign key needing rows moved — more than
+the obvious ones: `gennis_attendance_history_student`,
+`gennis_student_payment`, `gennis_student_charity`, `gennis_student_credit`,
+`gennis_lesson_attendance`, `gennis_student_group`,
+`gennis_deleted_student_group`, `gennis_student_registration`,
+`gennis_student_subject`, `gennis_student_test_v2`,
+`gennis_teacher_black_salary_entry`, `gennis_student_book_payment`,
+`gennis_deleted_student_book_payment`, `gennis_register_deleted_student`,
+`debt_call_batch_member`, `gennis_parent_registration`,
+`parent_child_link`, `lesson_plan_student` (plus `turon_*` tables that are
+likely out of scope — different product, confirm before touching).
+
+`gennis_student_credit` needs different handling than the rest: it has a
+UNIQUE constraint on `student_id`, so a merge must **sum** both balances
+into one row rather than re-pointing rows onto the canonical id.
+
+Canonical-id selection should be by activity level (payment count +
+attendance row count), not `min(id)`/oldest — an early registration with
+one payment shouldn't win over a later one with years of real enrollment.
+
+Process per confirmed cluster: verify via phone/parent_phone/birth_date
+(never name alone) → snapshot pre-merge sums per table per id → move rows
+→ sum-merge credit → mark the losing `gennis_student` inactive (repurpose
+`blocked`, or add a `merged_into_id` column) rather than deleting it → 
+re-sum the canonical id post-merge and confirm it equals the pre-merge
+combined total, same "sum before == sum after" discipline used throughout
+this doc. Any mismatch aborts, nothing commits.
+
+No script was written or run. Recommend building it with a `--dry-run`
+default (prints planned moves + the sum-check, writes nothing) before any
+`--apply` mode, following `fix_price_drift_batch.py`'s pattern.
+
 ## Lesson learned, applied going forward
 
 Every aggregate/batch approach tried today had a real error rate until
@@ -683,32 +833,36 @@ always verify those individually.
 
 - **§16's 64 discount-differs rows** — resolved in full, see §17. Nothing
   left open from this item.
-- **Davlatbek Musulmonov (231853)** — see §19's write-up: his real payment
-  ledger is exactly 2× his attendance-history payment sum, a clean ratio
-  that points specifically at duplicate student registration rather than
-  a stuck-payment or price bug. Worth using as the first test case when the
-  295-cluster merge work below starts — the ratio should make it easy to
-  confirm which second `gennis_student` record his other half of the money
-  is sitting under.
-- **269 students remaining in the negative-gap list** (−22.3M, corrected
-  formula). Two checked so far: one genuine bug (like 221855's phantom
-  credit), one "old tangled history" case with no clean row to attribute the
-  discrepancy to (same unsolved class as 222918, 232033, 231853/Davlatbek).
-  Expect a mix of both patterns throughout — no shortcut found yet.
-- **295 duplicate-student-registration clusters** with overlapping financial
-  activity (same person under 2+ `gennis_student` records with money split
-  across both). Distinguished from ~700 total duplicate-name clusters by
-  requiring genuinely overlapping payment date ranges — sequential
-  re-registrations (student left, came back a year later under a new ID)
-  are NOT bugs and don't need touching. The 295 need a proper merge script
-  (move all payment/debt-history rows to one canonical ID, mark the other
-  inactive) — not a credit-number patch. Top of the list by money involved:
-  Robiya Ergasheva (12.9M), Sevinch Bahromboyeva (8.2M), Gulzira
-  Abdumannopova (8M), Akbarshox To'shpo'latov (7.7M).
-- **216745, 222918, 232033, 231853 (Davlatbek)** — all show the "old
-  tangled history" pattern (real payments fall meaningfully short of what's
-  shown as applied, spread across many already-"fully paid" rows going back
-  to 2022-2024, with no single row to cleanly attribute the gap to). Left
-  untouched; needs a different investigative approach than anything used
-  today, possibly a full old-gennis-vs-v2 row-by-row diff for each rather
-  than the aggregate formula.
+- **Davlatbek Musulmonov (231853)** — resolved in full, see §21. Not
+  duplicate registration (checked and ruled out) — two separate real gaps
+  (§19's stuck-payment bug, plus a second payment that was never allocated
+  anywhere) that happened to sum to the same 790,000 by coincidence. Fully
+  reconciled: `sum(row payments) + credit` matches his real payment ledger
+  exactly. Nothing left open for him.
+- **269 students remaining in the negative-gap list** — corrected to
+  **299 / −22.79M** after fixing a self-inflicted double-count from §16's
+  batch fix (see §22). Sampled 3 so far (§23): all genuine "old tangled
+  history," no fast fix found — recommend the slow per-student method
+  (§17-19's cross-check discipline), not another batch attempt. One new
+  lead: Sanjarova (226413) shows a duplicate-shaped pattern (two groups,
+  identical numbers for 13 straight months) — check for a connection to the
+  295-cluster work below before spending fresh time on her specifically.
+- **295 duplicate-student-registration clusters** — scoped in full, see
+  §24, not executed. The exact "295" count couldn't be reproduced (109 or
+  37 clusters depending on match strictness); top clusters hand-verified
+  (Robiya Ergasheva confirmed exactly, 12.9M; Sevinch Bahromboyeva confirmed;
+  Gulzira Abdumannopova mostly confirmed, one ambiguous 3rd record;
+  Akbarshox To'shpo'latov not checked). Full merge design is written in
+  §24 — 21 tables need `student_id` rows moved, `gennis_student_credit`
+  needs sum-merging (UNIQUE constraint), canonical id by activity level not
+  age. No script written yet; next session should build it with
+  `--dry-run` first, following `fix_price_drift_batch.py`'s pattern, then
+  test against Sevinch Bahromboyeva's clean 2-record case before anything
+  ambiguous.
+- **216745, 222918, 232033** — still show the "old tangled history" pattern
+  (real payments fall meaningfully short of what's shown as applied, spread
+  across many already-"fully paid" rows going back to 2022-2024, with no
+  single row to cleanly attribute the gap to). Left untouched; needs a
+  different investigative approach than anything used today, possibly a
+  full old-gennis-vs-v2 row-by-row diff for each rather than the aggregate
+  formula.
