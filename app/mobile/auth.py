@@ -2,7 +2,7 @@ import hashlib
 import hmac
 import secrets
 from datetime import datetime, timedelta
-from typing import Optional, Tuple
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from passlib.context import CryptContext
@@ -17,12 +17,9 @@ from app.core.security import (
     get_password_hash,
     verify_apple_token,
     verify_google_token,
-    verify_password,
     verify_refresh_token,
 )
-from app.database import get_db, get_gennis_db, get_turon_db
-from app.external_models.gennis import Users as GennisUsers
-from app.external_models.turon import CustomUser as TuronUser
+from app.database import get_db
 from app.mobile.schemas import (
     MobileAppleAuthRequest,
     MobileAuthResponse,
@@ -37,12 +34,19 @@ from app.mobile.schemas import (
 router = APIRouter(prefix="/mobile/auth", tags=["Mobile - Auth"])
 
 
-# Multi-scheme verifier for external sources. Gennis/Turon store password
-# hashes in their own format (Flask app + Django app respectively); passlib
-# auto-detects the scheme from the hash prefix and falls through if unknown.
-# Note: Werkzeug's `pbkdf2:sha256:N$salt$hash` format is not natively
-# supported here — if Gennis uses that format you will need a small custom
-# verifier; the bcrypt and django_pbkdf2_sha256 schemes cover the common case.
+# The shared `user` table holds rows with several hash schemes: bcrypt
+# (native management-v2/gennis-v2/turon-v2 signups), django_pbkdf2_sha256
+# (migrated from old Turon by scripts/sync_turon_users.py, upgraded to
+# bcrypt lazily on first turon-v2 login), and Werkzeug (migrated from old
+# Gennis — see app/routers/v1/auth.py's web login, which already handles
+# this same case). passlib auto-detects bcrypt/django_pbkdf2_sha256 from the
+# hash prefix; Werkzeug's `pbkdf2:sha256:N$salt$hash` / `sha256$salt$hash`
+# formats aren't recognised by passlib, so `_verify_werkzeug` covers those.
+#
+# `_verify_external`/`_verify_werkzeug` are also imported directly by
+# app/mobile/me.py (password changes against the old external Gennis/Turon
+# DBs) and app/routers/v1/auth.py (web login) — keep their names/behavior
+# stable, don't fold them into something login-specific.
 external_pwd_context = CryptContext(
     schemes=[
         "bcrypt",
@@ -97,54 +101,23 @@ def _verify_external(plain: str, hashed: Optional[str]) -> bool:
         return False
 
 
-# ── Per-system credential lookup ─────────────────────────────────────────────
+def _lookup_shared_user(username: str, db: Session) -> Optional[models.User]:
+    """Return the shared `user` row by email or username.
 
-def _lookup_management(username: str, db: Session) -> Tuple[Optional[object], Optional[str]]:
-    """Return (user_row, stored_hash) for the management DB by email."""
-    user = db.query(models.User).filter(models.User.email == username).first()
-    if not user:
-        return None, None
-    return user, user.hashed_password
-
-
-def _lookup_gennis(username: str, gennis_db: Session) -> Tuple[Optional[object], Optional[str]]:
-    """Return (user_row, stored_hash) for the Gennis DB by username.
-
-    NULL `deleted` is treated as not-deleted (most rows in the legacy table
-    were never backfilled to `false`). Newest id wins when the same username
-    exists multiple times.
+    Historically this endpoint routed `system == "gennis"` / `"turon"` to the
+    old, now-decommissioned Gennis/Turon databases. Those apps have been
+    replaced by gennis-v2/turon-v2, which authenticate against this same
+    `user` table — so there is only ever one place to look, regardless of
+    which system the mobile client says it's logging in as.
     """
-    user = (
-        gennis_db.query(GennisUsers)
+    return (
+        db.query(models.User)
         .filter(
-            GennisUsers.username == username,
-            or_(GennisUsers.deleted == False, GennisUsers.deleted.is_(None)),
+            or_(models.User.email == username, models.User.username == username),
+            models.User.deleted == False,  # noqa: E712
         )
-        .order_by(GennisUsers.id.desc())
         .first()
     )
-    if not user:
-        return None, None
-    return user, getattr(user, "password", None)
-
-
-def _lookup_turon(username: str, turon_db: Session) -> Tuple[Optional[object], Optional[str]]:
-    """Return (user_row, stored_hash) for the Turon DB by username or phone.
-
-    Most staff log in with a Django username; legacy clients used phone.
-    """
-    user = (
-        turon_db.query(TuronUser)
-        .filter(
-            or_(TuronUser.username == username, TuronUser.phone == username),
-            or_(TuronUser.is_active == True, TuronUser.is_active.is_(None)),
-        )
-        .order_by(TuronUser.id.desc())
-        .first()
-    )
-    if not user:
-        return None, None
-    return user, getattr(user, "password", None)
 
 
 # ── Endpoint ─────────────────────────────────────────────────────────────────
@@ -153,68 +126,35 @@ def _lookup_turon(username: str, turon_db: Session) -> Tuple[Optional[object], O
 def mobile_login(
     payload: MobileLoginRequest,
     db: Session = Depends(get_db),
-    gennis_db: Session = Depends(get_gennis_db),
-    turon_db: Session = Depends(get_turon_db),
 ):
-    """Login against the system the user belongs to.
+    """Login against the shared `user` table.
 
-    The mobile client picks `system` on its login screen and submits the
-    matching identifier (email / username / phone) together with the plain
-    password. Management uses bcrypt via the existing helper; Gennis and
-    Turon are verified through a multi-scheme `passlib` context.
+    `system` is carried through onto the issued token so downstream
+    consumers know which app context the mobile client is using, but it no
+    longer selects a different database — see `_lookup_shared_user`.
     """
     system: SystemLiteral = payload.system
 
-    if system == "management":
-        user, hashed = _lookup_management(payload.username, db)
-        verified = bool(hashed) and verify_password(payload.password, hashed)
-        if not user or not verified:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid credentials",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
-        external_id = user.id
-        management_user_id = user.id
-        name = user.name
-        surname = user.surname
-        role = user.role
-
-    elif system == "gennis":
-        user, hashed = _lookup_gennis(payload.username, gennis_db)
-        if not user or not _verify_external(payload.password, hashed):
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid credentials",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
-        external_id = user.id
-        management_user_id = None
-        name = user.name
-        surname = user.surname
-        role = None
-
-    else:  # turon
-        user, hashed = _lookup_turon(payload.username, turon_db)
-        if not user or not _verify_external(payload.password, hashed):
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid credentials",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
-        external_id = user.id
-        management_user_id = None
-        name = user.name
-        surname = user.surname
-        role = None
+    user = _lookup_shared_user(payload.username, db)
+    if not user or not _verify_external(payload.password, user.hashed_password):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Account disabled",
+        )
 
     token_claims = {
-        "sub": f"{system}:{external_id}",
+        "sub": f"{system}:{user.id}",
         "system": system,
-        "external_id": external_id,
-        "management_user_id": management_user_id,
-        "name": f"{name or ''} {surname or ''}".strip() or None,
-        "role": role,
+        "external_id": user.id,
+        "management_user_id": user.id,
+        "name": f"{user.name or ''} {user.surname or ''}".strip() or None,
+        "role": user.role,
     }
 
     access_token = create_access_token(
@@ -229,11 +169,11 @@ def mobile_login(
         token_type="bearer",
         expires_in=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
         user=MobileUserOut(
-            id=external_id,
+            id=user.id,
             system=system,
-            name=name,
-            surname=surname,
-            role=role,
+            name=user.name,
+            surname=user.surname,
+            role=user.role,
         ),
     )
 
@@ -441,15 +381,12 @@ def mobile_apple_auth(
 def mobile_refresh(
     payload: MobileRefreshRequest,
     db: Session = Depends(get_db),
-    gennis_db: Session = Depends(get_gennis_db),
-    turon_db: Session = Depends(get_turon_db),
 ):
     """Exchange a valid refresh token for a fresh access token.
 
-    Validates the refresh token, re-loads the user from the source DB to pick
-    up any name/role changes, and re-issues both tokens (rotation). If the
-    user has been deactivated or deleted since the refresh token was minted,
-    the request is rejected.
+    Re-loads the user from the shared `user` table to pick up any
+    name/role/active-status changes since the refresh token was minted, and
+    rejects the request if the account has since been deactivated or deleted.
     """
     try:
         claims = verify_refresh_token(payload.refresh_token)
@@ -468,43 +405,12 @@ def mobile_refresh(
             detail="Refresh token missing system / external_id",
         )
 
-    user = None
-    role = None
-    name: Optional[str] = None
-    surname: Optional[str] = None
-    if system == "management":
-        user = db.query(models.User).filter(models.User.id == external_id).first()
-        if user and not user.is_active:
-            user = None
-        if user:
-            name, surname, role = user.name, user.surname, user.role
-        management_user_id = user.id if user else None
-    elif system == "gennis":
-        user = (
-            gennis_db.query(GennisUsers)
-            .filter(
-                GennisUsers.id == external_id,
-                or_(GennisUsers.deleted == False, GennisUsers.deleted.is_(None)),
-            )
-            .first()
-        )
-        if user:
-            name, surname = user.name, user.surname
-        management_user_id = None
-    else:
-        user = (
-            turon_db.query(TuronUser)
-            .filter(
-                TuronUser.id == external_id,
-                or_(TuronUser.is_active == True, TuronUser.is_active.is_(None)),
-            )
-            .first()
-        )
-        if user:
-            name, surname = user.name, user.surname
-        management_user_id = None
-
-    if not user:
+    user = (
+        db.query(models.User)
+        .filter(models.User.id == external_id, models.User.deleted == False)  # noqa: E712
+        .first()
+    )
+    if not user or not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="User no longer active",
@@ -514,9 +420,9 @@ def mobile_refresh(
         "sub": f"{system}:{external_id}",
         "system": system,
         "external_id": external_id,
-        "management_user_id": management_user_id,
-        "name": f"{name or ''} {surname or ''}".strip() or None,
-        "role": role,
+        "management_user_id": user.id,
+        "name": f"{user.name or ''} {user.surname or ''}".strip() or None,
+        "role": user.role,
     }
     access_token = create_access_token(
         data=token_claims,
@@ -532,8 +438,8 @@ def mobile_refresh(
         user=MobileUserOut(
             id=external_id,
             system=system,
-            name=name,
-            surname=surname,
-            role=role,
+            name=user.name,
+            surname=user.surname,
+            role=user.role,
         ),
     )

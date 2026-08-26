@@ -2179,6 +2179,90 @@ class TuronTeacherGroupStatistics(Base):
     synced_at        = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
 
+# ── Turon V2 (owned by turon-v2's own Alembic chain, NOT this project's) ─────
+# turon-v2 shares this DB and its own `user` table for identity (see User
+# above) — these tables are turon-v2's, mirrored here read-only so
+# management-v2 can resolve a shared-`user` login to their turon groups/
+# flows without a second DB round trip. Columns must track turon-v2's
+# app/models/{group,flow,registration}.py; do not migrate these here.
+
+class TuronGroupV2(Base):
+    __tablename__ = "turon_group_v2"
+    __table_args__ = {"extend_existing": True}
+
+    id         = Column(BigInteger, primary_key=True)
+    name       = Column(String(255), nullable=True)
+    branch_id  = Column(Integer, nullable=True)
+    price      = Column(Integer, nullable=True)
+    teacher_id = Column(BigInteger, ForeignKey("user.id"), nullable=True)
+    status     = Column(Boolean, default=True)
+    deleted    = Column(Boolean, default=False)
+
+
+turon_group_student_v2_table = Table(
+    "turon_group_student_v2", Base.metadata,
+    Column("id",              BigInteger, primary_key=True),
+    Column("group_id",        BigInteger, ForeignKey("turon_group_v2.id"), nullable=False),
+    Column("student_user_id", BigInteger, ForeignKey("user.id"),           nullable=False),
+    extend_existing=True,
+)
+
+
+class TuronFlowV2(Base):
+    """A student's second, independent container in turon — NOT derived from
+    Group membership. Has no price: unlike a group it isn't a billing unit."""
+    __tablename__ = "turon_flow_v2"
+    __table_args__ = {"extend_existing": True}
+
+    id         = Column(BigInteger, primary_key=True)
+    name       = Column(String(255), nullable=True)
+    branch_id  = Column(Integer, nullable=True)
+    teacher_id = Column(BigInteger, ForeignKey("user.id"), nullable=True)
+    activity   = Column(Boolean, default=False)
+    deleted    = Column(Boolean, default=False)
+
+
+turon_flow_student_v2_table = Table(
+    "turon_flow_student_v2", Base.metadata,
+    Column("id",              BigInteger, primary_key=True),
+    Column("flow_id",         BigInteger, ForeignKey("turon_flow_v2.id"), nullable=False),
+    Column("student_user_id", BigInteger, ForeignKey("user.id"),          nullable=False),
+    extend_existing=True,
+)
+
+
+class TuronUserProfileV2(Base):
+    """Existence of a row here is what marks a shared `user` as a turon
+    person at all (staff included, not just those currently in a group/
+    flow) — the turon-v2 equivalent of GennisUserLink's gate, except there's
+    no separate id to store: `user_id` IS the shared user id already."""
+    __tablename__ = "turon_user_profile_v2"
+    __table_args__ = {"extend_existing": True}
+
+    id          = Column(BigInteger, primary_key=True)
+    user_id     = Column(BigInteger, ForeignKey("user.id"), nullable=False, unique=True)
+    father_name = Column(String(255), nullable=True)
+    phone       = Column(String(50), nullable=False)
+    birth_date  = Column(Date, nullable=True)
+    branch_id   = Column(Integer, nullable=True)
+    created_at  = Column(DateTime, server_default=func.now())
+
+
+class GennisStudentCharity(Base):
+    __tablename__ = "gennis_student_charity"
+    __table_args__ = {"extend_existing": True}
+
+    id             = Column(BigInteger, primary_key=True, autoincrement=True)
+    student_id     = Column(Integer, nullable=False)
+    group_id       = Column(Integer, nullable=True)
+    location_id    = Column(Integer, nullable=True)
+    discount       = Column(BigInteger, nullable=False, default=0)
+    calendar_month = Column(Integer, nullable=False)
+    calendar_year  = Column(Integer, nullable=False)
+    deleted        = Column(Boolean, nullable=False, default=False)
+    created_at     = Column(DateTime, server_default=func.now())
+
+
 class GennisAttendanceHistoryTeacher(Base):
     __tablename__ = "gennis_attendance_history_teacher"
 

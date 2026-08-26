@@ -40,6 +40,7 @@ from .routers.v1.turon import (
     students as turon_students, teachers as turon_teachers,
     terms as turon_terms, timetable as turon_timetable,
 )
+from .routers.v1.integrations import student_platform as integrations_student_platform
 from .mobile import (
     auth as mobile_auth,
     events as mobile_events,
@@ -218,6 +219,7 @@ app.include_router(mobile_telegram.router, prefix=V1)
 app.include_router(mobile_me.router, prefix=V1)
 app.include_router(mobile_users.router, prefix=V1)
 app.include_router(mobile_scopes.router, prefix=V1)
+app.include_router(integrations_student_platform.router, prefix=V1)
 
 
 @app.get("/docs", include_in_schema=False)
