@@ -11,6 +11,7 @@ from app.config import settings
 from app.tasks import send_telegram_notification
 from app.routers.v1.auth import get_current_user
 from app.mobile.telegram import consume_mobile_link_code, resolve_mobile_link_code
+from app.services.telegram_voice import prepare_telegram_voice, create_mission_from_pending
 
 router = APIRouter(prefix="/telegram", tags=["Telegram"])
 
@@ -191,6 +192,83 @@ async def telegram_webhook(
             chat_id,
             f"✅ Hurmatli <b>{full_name}</b>, Telegram hisobingiz muvaffaqiyatli bog'landi!",
         )
+
+    # ── Pending reply: user sends text after voice ───────────────────────────
+    elif text:
+        import json as _json
+        pending_key = f"tg_voice_pending:{chat_id}"
+        pending_json = _redis.get(pending_key)
+        if pending_json:
+            pending = _json.loads(pending_json)
+
+            # Waiting for deadline (number)
+            if text.strip().isdigit():
+                deadline_days = max(1, int(text.strip()))
+                result = create_mission_from_pending(pending, deadline_days, db)
+                _redis.delete(pending_key)
+                reply = (
+                    f"✅ <b>Vazifa yaratildi!</b>\n\n"
+                    f"📋 {result['title']}\n"
+                    f"👤 Ijrochi: <b>{result['executor']}</b>\n"
+                    f"📅 Muddat: {result['deadline']}\n"
+                    f"🔖 Kategoriya: {result['category']}\n"
+                    f"🆔 ID: <code>{result['mission_id']}</code>"
+                )
+                send_telegram_notification.delay(chat_id, reply)
+                return {"ok": True}
+
+    # ── Voice message → AI mission creation ──────────────────────────────────
+    elif message.get("voice"):
+        creator = db.query(User).filter(
+            User.telegram_id == chat_id,
+            User.deleted == False,
+            User.is_active == True,
+        ).first()
+
+        if not creator:
+            send_telegram_notification.delay(
+                chat_id,
+                "❌ Telegram hisobingiz bog'lanmagan.\nAvval <b>Management</b> tizimida Telegram ulang.",
+            )
+            return {"ok": True}
+
+        send_telegram_notification.delay(chat_id, "⏳ Ovoz xabari qayta ishlanmoqda...")
+
+        result = await prepare_telegram_voice(message["voice"]["file_id"], creator.id, db)
+
+        if result["ok"]:
+            import json as _json
+            deadline_days = result["deadline_days"]
+
+            if result.get("deadline_explicit"):
+                # Deadline was mentioned in voice → create immediately
+                created = create_mission_from_pending(result, deadline_days, db)
+                reply = (
+                    f"✅ <b>Vazifa yaratildi!</b>\n\n"
+                    f"📋 {created['title']}\n"
+                    f"👤 Ijrochi: <b>{created['executor']}</b>\n"
+                    f"📅 Muddat: {created['deadline']}\n"
+                    f"🔖 Kategoriya: {created['category']}\n"
+                    f"🆔 ID: <code>{created['mission_id']}</code>"
+                )
+            else:
+                # No deadline in voice → ask user
+                _redis.setex(f"tg_voice_pending:{chat_id}", 120, _json.dumps(result))
+                reply = (
+                    f"🎯 <b>{result['title']}</b>\n"
+                    f"👤 Ijrochi: <b>{result['executor_name']}</b>\n"
+                    f"🔖 Kategoriya: {result['category']}\n\n"
+                    f"📅 Muddat necha kun?\n"
+                    f"<i>Raqam yuboring (standart: <b>{deadline_days}</b>)</i>"
+                )
+        else:
+            reply = "❌ " + result.get("error", "Noma'lum xato")
+            if result.get("transcript"):
+                reply += f"\n\n🎤 <i>{result['transcript']}</i>"
+            if result.get("title"):
+                reply += f"\n📋 Sarlavha: {result['title']}"
+
+        send_telegram_notification.delay(chat_id, reply)
 
     return {"ok": True}
 
