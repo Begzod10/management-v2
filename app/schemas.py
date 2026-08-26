@@ -361,7 +361,7 @@ class MissionUpdate(BaseModel):
 class MissionOut(BaseModel):
     id: int
     title: str
-    final_sc: int
+    final_sc: Optional[int] = None
     description: Optional[str]
     category: str
     creator_id: int
