@@ -42,7 +42,9 @@ interface User {
 
 interface Job { id: number; name: string; }
 
-const LIMIT = 50;
+const LIMIT = 200; // backend caps at 200 (Query(..., le=200) in list_staff_users) — was 50,
+// which meant paging through 5 near-empty screens for 227 staff. 200 fits nearly
+// everyone on one page and lets the table block actually fill the available height.
 
 // ─── Pagination (offset-based, matches SchoolTeachers.tsx's own local copy) ───
 function Pagination({

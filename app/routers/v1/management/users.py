@@ -8,7 +8,7 @@ from datetime import date, datetime
 from pydantic import BaseModel, EmailStr, Field
 from app.database import get_db
 from sqlalchemy.orm import joinedload
-from app.models import User, Section, Project, ProjectMember, SectionMember, SalaryMonth
+from app.models import User, Section, Project, ProjectMember, SectionMember, SalaryMonth, GennisUserLink, TuronUserLink
 from app.schemas import UserCreate, UserUpdate, UserOut, UserProfileOut, UserProjectOut, UserSectionOut
 from app.core.security import get_password_hash
 from app.dependencies import require_roles
@@ -100,16 +100,39 @@ def list_staff_users(
 
 @router.get("/unassigned", response_model=List[UserOut])
 def list_unassigned_users(db: Session = Depends(get_db)):
+    """Task-creation dropdown's 'Bo'limsiz xodimlar' bucket. `User` is the
+    identity table for the whole system (gennis/turon/task-management all
+    share it), so this must exclude gennis/turon accounts — otherwise this
+    bucket dumps ~18k students/teachers/parents in here instead of the
+    small number of real, unassigned office staff (confirmed: was 18,411,
+    should be ~130).
+
+    Two exclusions, both needed — neither alone is enough:
+      - `_NON_STAFF_ROLES` (same filter list_staff_users uses): catches the
+        bulk of gennis/turon accounts, which were synced straight into
+        `user` by scripts like copy_gennis_groups_students.py without ever
+        getting a gennis_user_link/turon_user_link row (those link tables
+        are only populated for accounts that actually log in through the
+        gennis/turon integration, not the full synced population).
+      - gennis_user_link / turon_user_link: catches linked accounts whose
+        role happens to be a staff-shaped one (e.g. a gennis location's
+        'staff'/'admin' role) rather than student/teacher/parent/assistant.
+    """
     in_project = db.query(ProjectMember.user_id)
     in_section = db.query(SectionMember.user_id)
+    is_gennis_linked = db.query(GennisUserLink.management_user_id)
+    is_turon_linked = db.query(TuronUserLink.management_user_id)
     return (
         db.query(User)
         .filter(
             User.deleted == False,
             User.role != "owner",
             User.role != "manager",
+            User.role.notin_(_NON_STAFF_ROLES + ("volunteer",)),
             ~User.id.in_(in_project),
             ~User.id.in_(in_section),
+            ~User.id.in_(is_gennis_linked),
+            ~User.id.in_(is_turon_linked),
         )
         .all()
     )
