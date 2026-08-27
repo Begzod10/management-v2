@@ -2190,13 +2190,15 @@ class TuronGroupV2(Base):
     __tablename__ = "turon_group_v2"
     __table_args__ = {"extend_existing": True}
 
-    id         = Column(BigInteger, primary_key=True)
-    name       = Column(String(255), nullable=True)
-    branch_id  = Column(Integer, nullable=True)
-    price      = Column(Integer, nullable=True)
-    teacher_id = Column(BigInteger, ForeignKey("user.id"), nullable=True)
-    status     = Column(Boolean, default=True)
-    deleted    = Column(Boolean, default=False)
+    id               = Column(BigInteger, primary_key=True)
+    name             = Column(String(255), nullable=True)
+    branch_id        = Column(Integer, nullable=True)
+    class_number_id  = Column(BigInteger, ForeignKey("turon_class_number_v2.id"), nullable=True)
+    color_id         = Column(BigInteger, ForeignKey("turon_class_color_v2.id"), nullable=True)
+    price            = Column(Integer, nullable=True)
+    teacher_id       = Column(BigInteger, ForeignKey("user.id"), nullable=True)
+    status           = Column(Boolean, default=True)
+    deleted          = Column(Boolean, default=False)
 
 
 turon_group_student_v2_table = Table(
@@ -2283,6 +2285,7 @@ class TuronStudentPaymentV2(Base):
     payment_sum     = Column(BigInteger, default=0)
     extra_payment   = Column(BigInteger, default=0)
     date            = Column(Date, nullable=False)
+    attendance_id   = Column(BigInteger, ForeignKey("turon_attendance_per_month_v2.id"), nullable=True)
     # True = one-time discount credit, not a real cash/bank/click payment —
     # same filter direction as old turon's own status flag (see turon-v2's
     # app/models/payment.py docstring). Revenue queries exclude status=True.
@@ -2367,6 +2370,134 @@ class TuronBranchTransactionV2(Base):
     date            = Column(Date, nullable=False)
     deleted         = Column(Boolean, default=False)
     created_at  = Column(DateTime, server_default=func.now())
+
+
+# ── Turon V2 people/academic tables (same caveat as the financial block
+# above — owned by turon-v2's own Alembic chain, extend_existing only, no
+# migration here). Added for turon/detail.py — see conversation. ──────────
+
+class TuronBranchV2(Base):
+    """id is the raw v1 branch id itself (no autoincrement, no old_id
+    indirection) — see turon-v2's own app/models/branch.py docstring."""
+    __tablename__ = "turon_branch_v2"
+    __table_args__ = {"extend_existing": True}
+
+    id      = Column(Integer, primary_key=True, autoincrement=False)
+    name    = Column(String(255), nullable=False)
+    code    = Column(Integer, nullable=True)
+    deleted = Column(Boolean, default=False)
+
+
+class TuronClassNumberV2(Base):
+    __tablename__ = "turon_class_number_v2"
+    __table_args__ = {"extend_existing": True}
+
+    id        = Column(BigInteger, primary_key=True)
+    number    = Column(Integer, nullable=False)
+    branch_id = Column(Integer, nullable=True)
+    deleted   = Column(Boolean, default=False)
+
+
+class TuronClassColorV2(Base):
+    __tablename__ = "turon_class_color_v2"
+    __table_args__ = {"extend_existing": True}
+
+    id    = Column(BigInteger, primary_key=True)
+    name  = Column(String(100), nullable=True)
+    value = Column(String(100), nullable=True)
+
+
+class TuronTeacherProfileV2(Base):
+    """One row per teacher account (registration profile), NOT a delete-
+    exception table — unlike TuronStaffProfileV2 below. `subjects` is a
+    JSON array of {id, name} — used directly for the "subject" column on
+    /teacher-salaries instead of a teacher_subjects M2M (turon-v2 has none;
+    this JSON is the actual source turon-v2's own UI reads)."""
+    __tablename__ = "turon_teacher_profile_v2"
+    __table_args__ = {"extend_existing": True}
+
+    id       = Column(BigInteger, primary_key=True)
+    user_id  = Column(BigInteger, ForeignKey("user.id"), nullable=False, unique=True)
+    subjects = Column(JSONB, nullable=True)
+    deleted  = Column(Boolean, default=False)
+
+
+class TuronStaffProfileV2(Base):
+    """NOT a full staff directory — old turon has no per-role staff profile
+    table, so this exists purely to carry turon-v2's own soft-delete flag
+    (see turon-v2's app/models/registration.py::TuronStaffProfile). A
+    staff account with NO row here is active; a row with deleted=true is
+    the only way a staff member is excluded — confirmed live: every row
+    in this table today has deleted=true (27/27), i.e. it currently only
+    ever grows by deletions, never by registrations."""
+    __tablename__ = "turon_staff_profile_v2"
+    __table_args__ = {"extend_existing": True}
+
+    id      = Column(BigInteger, primary_key=True)
+    user_id = Column(BigInteger, ForeignKey("user.id"), nullable=False, unique=True)
+    deleted = Column(Boolean, default=False)
+
+
+class TuronDeletedStudentV2(Base):
+    __tablename__ = "turon_deleted_student_v2"
+    __table_args__ = {"extend_existing": True}
+
+    id              = Column(BigInteger, primary_key=True)
+    student_user_id = Column(BigInteger, ForeignKey("user.id"), nullable=True)
+    group_id        = Column(BigInteger, ForeignKey("turon_group_v2.id"), nullable=True)
+    deleted_date    = Column(Date, nullable=False)
+
+
+class TuronAttendancePerMonthV2(Base):
+    """Per-student, per-month debt/payment/discount snapshot — the same
+    row shape old turon's AttendancePerMonth had. student_id IS the shared
+    `user`.id directly (confirmed: no separate Student-table indirection
+    in turon-v2, unlike v1)."""
+    __tablename__ = "turon_attendance_per_month_v2"
+    __table_args__ = {"extend_existing": True}
+
+    id             = Column(BigInteger, primary_key=True)
+    student_id     = Column(Integer, nullable=False)
+    branch_id      = Column(Integer, nullable=True)
+    group_id       = Column(BigInteger, ForeignKey("turon_group_v2.id"), nullable=True)
+    month_date     = Column(Date, nullable=False)
+    total_debt     = Column(BigInteger, default=0)
+    remaining_debt = Column(BigInteger, default=0)
+    discount       = Column(BigInteger, default=0)
+    deleted        = Column(Boolean, default=False)
+
+
+class TuronTeacherSalaryV2(Base):
+    """Monthly salary total per teacher — distinct from
+    TuronTeacherSalaryPaymentV2 above, which is the individual payment
+    ledger this table's taken_salary is derived from."""
+    __tablename__ = "turon_teacher_salary_v2"
+    __table_args__ = {"extend_existing": True}
+
+    id               = Column(BigInteger, primary_key=True)
+    teacher_id       = Column(Integer, nullable=False)
+    branch_id        = Column(Integer, nullable=True)
+    month_date       = Column(Date, nullable=False)
+    total_salary     = Column(BigInteger, default=0)
+    taken_salary     = Column(BigInteger, default=0)
+    remaining_salary = Column(BigInteger, default=0)
+    deleted          = Column(Boolean, default=False)
+
+
+class TuronStaffSalaryV2(Base):
+    """Monthly salary total per staff account — distinct from
+    TuronStaffSalaryPaymentV2 above (the payment ledger)."""
+    __tablename__ = "turon_staff_salary_v2"
+    __table_args__ = {"extend_existing": True}
+
+    id               = Column(BigInteger, primary_key=True)
+    user_id          = Column(Integer, nullable=False)
+    branch_id        = Column(Integer, nullable=True)
+    month_date       = Column(Date, nullable=False)
+    total_salary     = Column(BigInteger, default=0)
+    taken_salary     = Column(BigInteger, default=0)
+    remaining_salary = Column(BigInteger, default=0)
+    deleted          = Column(Boolean, default=False)
 
 
 class GennisStudentCharity(Base):
