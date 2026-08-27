@@ -11,6 +11,16 @@ from app.models import Dividend, Investment, ApiLog
 from app.external_models.turon import TuronApiLog, TuronCustomUser
 from app.external_models.gennis import GennisApiLog, Users as GennisUsers
 from app.models import User
+from app.models import (
+    PaymentType,
+    TuronStudentPaymentV2,
+    TuronTeacherSalaryPaymentV2,
+    TuronStaffSalaryPaymentV2,
+    TuronOverheadTypeV2,
+    TuronOverheadV2,
+    TuronCapitalV2,
+    TuronBranchTransactionV2,
+)
 from app.schemas_stats import (
     ByPaymentType, BranchTransactionTotals,
     GennisOverheadSummary, TuronOverheadSummary,
@@ -806,31 +816,40 @@ def gennis_summary(
 
 
 # ─── Turon ────────────────────────────────────────────────────────────────────
+# Reads locally (get_db → turon-v2's own turon_*_v2 tables + the shared
+# `payment_type` reference), NOT the external old-turon DB (get_turon_db).
+# Old turon has had no real admin activity since 2026-08-20 — turon-v2 is the
+# live system now, and its financial tables already live in this same DB
+# (see app/models.py's "Turon V2 financial tables" block, and conversation
+# for the full verification: payments 4,738/5,088 old rows carried over,
+# the rest orphaned/zero-value junk worth <0.5% of total value, and native
+# turon-v2 payments still landing as recently as the day this was checked).
 
 @router.get("/turon/payments", response_model=ByPaymentType)
 def turon_payments(
     month: Optional[int] = Query(None, ge=1, le=12),
     year: Optional[int] = Query(None, ge=2000),
     branch_id: Optional[int] = Query(None),
-    db: Session = Depends(get_turon_db),
+    db: Session = Depends(get_db),
     from_date: Optional[date] = Query(None),
     to_date: Optional[date] = Query(None),
 ):
     """Student payments in Turon — total + breakdown by payment type."""
     rows = (
         db.query(
-            T.PaymentTypes.name,
-            func.coalesce(func.sum(T.StudentPayment.payment_sum), 0).label("total"),
+            PaymentType.name,
+            func.coalesce(func.sum(TuronStudentPaymentV2.payment_sum), 0).label("total"),
         )
-        .join(T.PaymentTypes, T.PaymentTypes.id == T.StudentPayment.payment_type_id)
-        # Match Turon encashment/views and permissions/response: revenue is
-        # status == False (status == True represents already-encashed rows).
-        .filter(T.StudentPayment.deleted == False, T.StudentPayment.status == False)
+        .join(PaymentType, PaymentType.id == TuronStudentPaymentV2.payment_type_id)
+        # Match turon-v2's own accounting: revenue is status == False (True
+        # is a one-time discount credit, not a real cash/bank/click payment
+        # — same filter direction old turon used, see app/models.py).
+        .filter(TuronStudentPaymentV2.deleted == False, TuronStudentPaymentV2.status == False)
     )
-    rows = _month_year_filter_turon(rows, T.StudentPayment.date, month, year, from_date=from_date, to_date=to_date)
+    rows = _month_year_filter_turon(rows, TuronStudentPaymentV2.date, month, year, from_date=from_date, to_date=to_date)
     if branch_id:
-        rows = rows.filter(T.StudentPayment.branch_id == branch_id)
-    rows = rows.group_by(T.PaymentTypes.name).all()
+        rows = rows.filter(TuronStudentPaymentV2.branch_id == branch_id)
+    rows = rows.group_by(PaymentType.name).all()
 
     by_type = [{"payment_type": r.name, "total": r.total} for r in rows]
     grand_total = sum(r["total"] for r in by_type)
@@ -843,23 +862,23 @@ def turon_teacher_salaries(
     month: Optional[int] = Query(None, ge=1, le=12),
     year: Optional[int] = Query(None, ge=2000),
     branch_id: Optional[int] = Query(None),
-    db: Session = Depends(get_turon_db),
+    db: Session = Depends(get_db),
     from_date: Optional[date] = Query(None),
     to_date: Optional[date] = Query(None),
 ):
     """Teacher salary payments in Turon — total + breakdown by payment type."""
     rows = (
         db.query(
-            T.PaymentTypes.name,
-            func.coalesce(func.sum(T.TeacherSalaryList.salary), 0).label("total"),
+            PaymentType.name,
+            func.coalesce(func.sum(TuronTeacherSalaryPaymentV2.salary), 0).label("total"),
         )
-        .join(T.PaymentTypes, T.PaymentTypes.id == T.TeacherSalaryList.payment_id)
-        .filter(T.TeacherSalaryList.deleted == False)
+        .join(PaymentType, PaymentType.id == TuronTeacherSalaryPaymentV2.payment_type_id)
+        .filter(TuronTeacherSalaryPaymentV2.deleted == False)
     )
-    rows = _month_year_filter_turon(rows, T.TeacherSalaryList.date, month, year, from_date=from_date, to_date=to_date)
+    rows = _month_year_filter_turon(rows, TuronTeacherSalaryPaymentV2.date, month, year, from_date=from_date, to_date=to_date)
     if branch_id:
-        rows = rows.filter(T.TeacherSalaryList.branch_id == branch_id)
-    rows = rows.group_by(T.PaymentTypes.name).all()
+        rows = rows.filter(TuronTeacherSalaryPaymentV2.branch_id == branch_id)
+    rows = rows.group_by(PaymentType.name).all()
 
     by_type = [{"payment_type": r.name, "total": r.total} for r in rows]
     grand_total = sum(r["total"] for r in by_type)
@@ -872,23 +891,23 @@ def turon_staff_salaries(
     month: Optional[int] = Query(None, ge=1, le=12),
     year: Optional[int] = Query(None, ge=2000),
     branch_id: Optional[int] = Query(None),
-    db: Session = Depends(get_turon_db),
+    db: Session = Depends(get_db),
     from_date: Optional[date] = Query(None),
     to_date: Optional[date] = Query(None),
 ):
     """Staff (user) salary payments in Turon — total + breakdown by payment type."""
     rows = (
         db.query(
-            T.PaymentTypes.name,
-            func.coalesce(func.sum(T.UserSalaryList.salary), 0).label("total"),
+            PaymentType.name,
+            func.coalesce(func.sum(TuronStaffSalaryPaymentV2.salary), 0).label("total"),
         )
-        .join(T.PaymentTypes, T.PaymentTypes.id == T.UserSalaryList.payment_types_id)
-        .filter(T.UserSalaryList.deleted == False)
+        .join(PaymentType, PaymentType.id == TuronStaffSalaryPaymentV2.payment_type_id)
+        .filter(TuronStaffSalaryPaymentV2.deleted == False)
     )
-    rows = _month_year_filter_turon(rows, T.UserSalaryList.date, month, year, from_date=from_date, to_date=to_date)
+    rows = _month_year_filter_turon(rows, TuronStaffSalaryPaymentV2.date, month, year, from_date=from_date, to_date=to_date)
     if branch_id:
-        rows = rows.filter(T.UserSalaryList.branch_id == branch_id)
-    rows = rows.group_by(T.PaymentTypes.name).all()
+        rows = rows.filter(TuronStaffSalaryPaymentV2.branch_id == branch_id)
+    rows = rows.group_by(PaymentType.name).all()
 
     by_type = [{"payment_type": r.name, "total": r.total} for r in rows]
     grand_total = sum(r["total"] for r in by_type)
@@ -901,7 +920,7 @@ def turon_overheads(
     month: Optional[int] = Query(None, ge=1, le=12),
     year: Optional[int] = Query(None, ge=2000),
     branch_id: Optional[int] = Query(None),
-    db: Session = Depends(get_turon_db),
+    db: Session = Depends(get_db),
     from_date: Optional[date] = Query(None),
     to_date: Optional[date] = Query(None),
 ):
@@ -909,30 +928,30 @@ def turon_overheads(
     # by overhead type
     type_rows = (
         db.query(
-            T.OverheadType.name,
-            func.coalesce(func.sum(T.Overhead.price), 0).label("total"),
+            TuronOverheadTypeV2.name,
+            func.coalesce(func.sum(TuronOverheadV2.price), 0).label("total"),
         )
-        .join(T.OverheadType, T.OverheadType.id == T.Overhead.type_id)
-        .filter(T.Overhead.deleted == False)
+        .join(TuronOverheadTypeV2, TuronOverheadTypeV2.id == TuronOverheadV2.type_id)
+        .filter(TuronOverheadV2.deleted == False)
     )
-    type_rows = _month_year_filter_turon(type_rows, T.Overhead.created, month, year, from_date=from_date, to_date=to_date)
+    type_rows = _month_year_filter_turon(type_rows, TuronOverheadV2.date, month, year, from_date=from_date, to_date=to_date)
     if branch_id:
-        type_rows = type_rows.filter(T.Overhead.branch_id == branch_id)
-    type_rows = type_rows.group_by(T.OverheadType.name).all()
+        type_rows = type_rows.filter(TuronOverheadV2.branch_id == branch_id)
+    type_rows = type_rows.group_by(TuronOverheadTypeV2.name).all()
 
     # by payment type
     pay_rows = (
         db.query(
-            T.PaymentTypes.name,
-            func.coalesce(func.sum(T.Overhead.price), 0).label("total"),
+            PaymentType.name,
+            func.coalesce(func.sum(TuronOverheadV2.price), 0).label("total"),
         )
-        .join(T.PaymentTypes, T.PaymentTypes.id == T.Overhead.payment_id)
-        .filter(T.Overhead.deleted == False)
+        .join(PaymentType, PaymentType.id == TuronOverheadV2.payment_type_id)
+        .filter(TuronOverheadV2.deleted == False)
     )
-    pay_rows = _month_year_filter_turon(pay_rows, T.Overhead.created, month, year, from_date=from_date, to_date=to_date)
+    pay_rows = _month_year_filter_turon(pay_rows, TuronOverheadV2.date, month, year, from_date=from_date, to_date=to_date)
     if branch_id:
-        pay_rows = pay_rows.filter(T.Overhead.branch_id == branch_id)
-    pay_rows = pay_rows.group_by(T.PaymentTypes.name).all()
+        pay_rows = pay_rows.filter(TuronOverheadV2.branch_id == branch_id)
+    pay_rows = pay_rows.group_by(PaymentType.name).all()
 
     grand_total = sum(r.total for r in type_rows)
 
@@ -948,23 +967,23 @@ def turon_capitals(
     month: Optional[int] = Query(None, ge=1, le=12),
     year: Optional[int] = Query(None, ge=2000),
     branch_id: Optional[int] = Query(None),
-    db: Session = Depends(get_turon_db),
+    db: Session = Depends(get_db),
     from_date: Optional[date] = Query(None),
     to_date: Optional[date] = Query(None),
 ):
-    """Capital expenditure in Turon (capital_oldcapital) — total + breakdown by payment type."""
+    """Capital expenditure in Turon — total + breakdown by payment type."""
     rows = (
         db.query(
-            T.PaymentTypes.name,
-            func.coalesce(func.sum(T.OldCapital.price), 0).label("total"),
+            PaymentType.name,
+            func.coalesce(func.sum(TuronCapitalV2.price), 0).label("total"),
         )
-        .join(T.PaymentTypes, T.PaymentTypes.id == T.OldCapital.payment_type_id)
-        .filter(T.OldCapital.deleted == False)
+        .join(PaymentType, PaymentType.id == TuronCapitalV2.payment_type_id)
+        .filter(TuronCapitalV2.deleted == False)
     )
-    rows = _month_year_filter_turon(rows, T.OldCapital.added_date, month, year, from_date=from_date, to_date=to_date)
+    rows = _month_year_filter_turon(rows, TuronCapitalV2.added_date, month, year, from_date=from_date, to_date=to_date)
     if branch_id:
-        rows = rows.filter(T.OldCapital.branch_id == branch_id)
-    rows = rows.group_by(T.PaymentTypes.name).all()
+        rows = rows.filter(TuronCapitalV2.branch_id == branch_id)
+    rows = rows.group_by(PaymentType.name).all()
 
     by_type = [{"payment_type": r.name, "total": r.total} for r in rows]
     grand_total = sum(r["total"] for r in by_type)
@@ -976,24 +995,24 @@ def turon_branch_transactions(
     month: Optional[int] = Query(None, ge=1, le=12),
     year: Optional[int] = Query(None, ge=2000),
     branch_id: Optional[int] = Query(None),
-    db: Session = Depends(get_turon_db),
+    db: Session = Depends(get_db),
     from_date: Optional[date] = Query(None),
     to_date: Optional[date] = Query(None),
 ):
     """Branch transactions in Turon — split by direction (give/receive) with per-payment-type breakdown."""
     base = (
         db.query(
-            T.TuronBranchTransaction.is_give.label("is_give"),
-            T.PaymentTypes.name.label("payment_type"),
-            func.coalesce(func.sum(T.TuronBranchTransaction.amount), 0).label("total"),
+            TuronBranchTransactionV2.is_give.label("is_give"),
+            PaymentType.name.label("payment_type"),
+            func.coalesce(func.sum(TuronBranchTransactionV2.amount), 0).label("total"),
         )
-        .join(T.PaymentTypes, T.PaymentTypes.id == T.TuronBranchTransaction.payment_type_id)
-        .filter(T.TuronBranchTransaction.deleted == False)
+        .join(PaymentType, PaymentType.id == TuronBranchTransactionV2.payment_type_id)
+        .filter(TuronBranchTransactionV2.deleted == False)
     )
-    base = _month_year_filter_turon(base, T.TuronBranchTransaction.date, month, year, from_date=from_date, to_date=to_date)
+    base = _month_year_filter_turon(base, TuronBranchTransactionV2.date, month, year, from_date=from_date, to_date=to_date)
     if branch_id:
-        base = base.filter(T.TuronBranchTransaction.branch_id == branch_id)
-    rows = base.group_by(T.TuronBranchTransaction.is_give, T.PaymentTypes.name).all()
+        base = base.filter(TuronBranchTransactionV2.branch_id == branch_id)
+    rows = base.group_by(TuronBranchTransactionV2.is_give, PaymentType.name).all()
 
     give_by_type: List[dict] = []
     receive_by_type: List[dict] = []
@@ -1015,8 +1034,7 @@ def turon_summary(
     month: Optional[int] = Query(None, ge=1, le=12),
     year: Optional[int] = Query(None, ge=2000),
     branch_id: Optional[int] = Query(None),
-    db: Session = Depends(get_turon_db),
-    local_db: Session = Depends(get_db),
+    db: Session = Depends(get_db),
     from_date: Optional[date] = Query(None),
     to_date: Optional[date] = Query(None),
 ):
@@ -1027,8 +1045,8 @@ def turon_summary(
     overheads = turon_overheads(month, year, branch_id, db, from_date=from_date, to_date=to_date)
     capitals = turon_capitals(month, year, branch_id, db, from_date=from_date, to_date=to_date)
     branch_transactions = turon_branch_transactions(month, year, branch_id, db, from_date=from_date, to_date=to_date)
-    dividends = _get_total(local_db, Dividend, "turon", month, year, branch_id=branch_id, from_date=from_date, to_date=to_date)
-    investments = _get_total(local_db, Investment, "turon", month, year, branch_id=branch_id, from_date=from_date, to_date=to_date)
+    dividends = _get_total(db, Dividend, "turon", month, year, branch_id=branch_id, from_date=from_date, to_date=to_date)
+    investments = _get_total(db, Investment, "turon", month, year, branch_id=branch_id, from_date=from_date, to_date=to_date)
 
     total_expenses = (
         teacher_salaries["total"] + staff_salaries["total"] + overheads["total"]
@@ -1062,14 +1080,13 @@ def overview(
     gennis_location_id: Optional[int] = Query(None),
     turon_branch_id: Optional[int] = Query(None),
     gennis_db: Session = Depends(get_gennis_db),
-    turon_db: Session = Depends(get_turon_db),
     local_db: Session = Depends(get_db),
     from_date: Optional[date] = Query(None),
     to_date: Optional[date] = Query(None),
 ):
     """Director dashboard: combined stats from both systems."""
     g = gennis_summary(month, year, gennis_location_id, gennis_db, local_db, from_date=from_date, to_date=to_date)
-    t = turon_summary(month, year, turon_branch_id, turon_db, local_db, from_date=from_date, to_date=to_date)
+    t = turon_summary(month, year, turon_branch_id, local_db, from_date=from_date, to_date=to_date)
 
     total_payments = g["payments"]["total"] + t["payments"]["total"]
     total_teacher_salaries = g["teacher_salaries"]["total"] + t["teacher_salaries"]["total"]

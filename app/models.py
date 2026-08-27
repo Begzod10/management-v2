@@ -2245,6 +2245,127 @@ class TuronUserProfileV2(Base):
     phone       = Column(String(50), nullable=False)
     birth_date  = Column(Date, nullable=True)
     branch_id   = Column(Integer, nullable=True)
+
+
+class PaymentType(Base):
+    """Shared payment-type reference (cash/click/bank) — owned by turon-v2's
+    own migration (see its scripts/inspect_payment_types.py), not this
+    project's. turon_*_v2 financial tables' payment_type_id FKs here, and
+    it's what statistics.py now joins against for Turon (see below) instead
+    of old turon's live payments_paymenttypes — same 3 rows, no reason to
+    keep hitting the external DB for a table that never changes."""
+    __tablename__ = "payment_type"
+    __table_args__ = {"extend_existing": True}
+
+    id   = Column(Integer, primary_key=True)
+    name = Column(String(100), nullable=False)
+    slug = Column(String(50), nullable=False, unique=True)
+
+
+# ── Turon V2 financial tables (owned by turon-v2's own Alembic chain, NOT
+# this project's — same caveat as TuronGroupV2 etc. above: do not migrate
+# these here, and keep columns tracking turon-v2's app/models/{payment,
+# salary,overhead,capital,branch}.py). Added so statistics.py's Turon
+# functions can read turon-v2's own live financial data locally instead of
+# old turon's frozen (no admin activity since 2026-08-20) external DB —
+# see conversation. Only the payment-ledger tables statistics.py actually
+# sums are mirrored (e.g. TeacherSalary's own monthly-total table has no
+# use here, only its *_payment child does). ────────────────────────────────
+
+class TuronStudentPaymentV2(Base):
+    __tablename__ = "turon_student_payment_v2"
+    __table_args__ = {"extend_existing": True}
+
+    id              = Column(BigInteger, primary_key=True)
+    student_id      = Column(Integer, nullable=False, index=True)
+    branch_id       = Column(Integer, nullable=True, index=True)
+    payment_type_id = Column(Integer, ForeignKey("payment_type.id"), nullable=True)
+    payment_sum     = Column(BigInteger, default=0)
+    extra_payment   = Column(BigInteger, default=0)
+    date            = Column(Date, nullable=False)
+    # True = one-time discount credit, not a real cash/bank/click payment —
+    # same filter direction as old turon's own status flag (see turon-v2's
+    # app/models/payment.py docstring). Revenue queries exclude status=True.
+    status          = Column(Boolean, default=False)
+    deleted         = Column(Boolean, default=False)
+    created_at      = Column(DateTime, server_default=func.now())
+
+
+class TuronTeacherSalaryPaymentV2(Base):
+    __tablename__ = "turon_teacher_salary_payment_v2"
+    __table_args__ = {"extend_existing": True}
+
+    id               = Column(BigInteger, primary_key=True)
+    teacher_salary_id = Column(Integer, nullable=True)
+    teacher_id       = Column(Integer, nullable=True)
+    branch_id        = Column(Integer, nullable=True)
+    payment_type_id  = Column(Integer, ForeignKey("payment_type.id"), nullable=True)
+    date             = Column(Date, nullable=False)
+    salary           = Column(BigInteger, default=0)
+    deleted          = Column(Boolean, default=False)
+
+
+class TuronStaffSalaryPaymentV2(Base):
+    __tablename__ = "turon_staff_salary_payment_v2"
+    __table_args__ = {"extend_existing": True}
+
+    id               = Column(BigInteger, primary_key=True)
+    staff_salary_id  = Column(Integer, nullable=True)
+    user_id          = Column(Integer, nullable=True)
+    branch_id        = Column(Integer, nullable=True)
+    payment_type_id  = Column(Integer, ForeignKey("payment_type.id"), nullable=True)
+    date             = Column(Date, nullable=False)
+    salary           = Column(BigInteger, default=0)
+    deleted          = Column(Boolean, default=False)
+
+
+class TuronOverheadTypeV2(Base):
+    __tablename__ = "turon_overhead_type_v2"
+    __table_args__ = {"extend_existing": True}
+
+    id        = Column(BigInteger, primary_key=True)
+    name      = Column(String(300), nullable=True)
+    deleted   = Column(Boolean, default=False)
+
+
+class TuronOverheadV2(Base):
+    __tablename__ = "turon_overhead_v2"
+    __table_args__ = {"extend_existing": True}
+
+    id              = Column(BigInteger, primary_key=True)
+    name            = Column(String(300), nullable=True)
+    payment_type_id = Column(Integer, ForeignKey("payment_type.id"), nullable=True)
+    date            = Column(Date, nullable=False)
+    price           = Column(Integer, nullable=True)
+    branch_id       = Column(Integer, nullable=True)
+    type_id         = Column(BigInteger, ForeignKey("turon_overhead_type_v2.id"), nullable=True)
+    deleted         = Column(Boolean, default=False)
+
+
+class TuronCapitalV2(Base):
+    __tablename__ = "turon_capital_v2"
+    __table_args__ = {"extend_existing": True}
+
+    id              = Column(BigInteger, primary_key=True)
+    name            = Column(String(500), nullable=False)
+    price           = Column(Integer, nullable=False)
+    added_date      = Column(Date, nullable=False)
+    branch_id       = Column(Integer, nullable=True)
+    payment_type_id = Column(Integer, ForeignKey("payment_type.id"), nullable=True)
+    deleted         = Column(Boolean, default=False)
+
+
+class TuronBranchTransactionV2(Base):
+    __tablename__ = "turon_branch_transaction_v2"
+    __table_args__ = {"extend_existing": True}
+
+    id              = Column(BigInteger, primary_key=True)
+    amount          = Column(BigInteger, nullable=False)
+    is_give         = Column(Boolean, nullable=False)
+    payment_type_id = Column(Integer, ForeignKey("payment_type.id"), nullable=True)
+    branch_id       = Column(Integer, nullable=False, index=True)
+    date            = Column(Date, nullable=False)
+    deleted         = Column(Boolean, default=False)
     created_at  = Column(DateTime, server_default=func.now())
 
 
