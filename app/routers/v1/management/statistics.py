@@ -20,6 +20,12 @@ from app.models import (
     TuronOverheadV2,
     TuronCapitalV2,
     TuronBranchTransactionV2,
+    GennisStudentPaymentLive,
+    GennisTeacherSalaryPaymentLive,
+    GennisStaffSalaryPaymentLive,
+    GennisOverheadLive,
+    GennisCapitalExpenditureLive,
+    GennisBranchTransactionLive,
 )
 from app.schemas_stats import (
     ByPaymentType, BranchTransactionTotals,
@@ -575,32 +581,54 @@ def _month_year_filter_turon(q, date_col, month, year, from_date: Optional[date]
 
 # ─── Gennis ───────────────────────────────────────────────────────────────────
 
+def _month_year_filter_gennis_local(q, model, date_col, month, year, from_date: Optional[date] = None, to_date: Optional[date] = None):
+    """Gennis-v2's own tables carry plain calendar_month/calendar_year
+    integers (not FK ids into a CalendarMonth lookup like old gennis), so
+    no join is needed — and a real date column, so from_date/to_date are
+    exact rather than day-precision-via-join."""
+    if month:
+        q = q.filter(model.calendar_month == month)
+    if year:
+        q = q.filter(model.calendar_year == year)
+    if from_date:
+        q = q.filter(date_col >= from_date)
+    if to_date:
+        q = q.filter(date_col < to_date + timedelta(days=1))
+    return q
+
+
+# ─── Gennis ───────────────────────────────────────────────────────────────────
+# Reads locally (get_db → gennis-v2's own tables), NOT the external old-
+# gennis DB (get_gennis_db). Old gennis has had no real activity since
+# 2026-08-19 — gennis-v2 is the live system now, and its data already
+# lives in this same DB (see app/models.py's "Gennis live tables" block).
+
 @router.get("/gennis/payments", response_model=ByPaymentType)
 def gennis_payments(
     month: Optional[int] = Query(None, ge=1, le=12),
     year: Optional[int] = Query(None, ge=2000),
     location_id: Optional[int] = Query(None),
-    db: Session = Depends(get_gennis_db),
+    db: Session = Depends(get_db),
     from_date: Optional[date] = Query(None),
     to_date: Optional[date] = Query(None),
 ):
-    """Student payments in Gennis — total + breakdown by payment type."""
-    # Match Gennis backend's account_details: only count confirmed payments
-    # (payment == True). Excludes drafts / unconfirmed / cancelled rows.
+    """Student payments in Gennis — total + breakdown by payment channel."""
+    # is_real_payment == False is a discount, not a real cash/bank/click
+    # payment — same "only count confirmed payments" intent as old gennis's
+    # `payment == True` filter.
     rows = (
         db.query(
-            G.PaymentTypes.name,
-            func.coalesce(func.sum(G.StudentPayments.payment_sum), 0).label("total"),
+            GennisStudentPaymentLive.channel,
+            func.coalesce(func.sum(GennisStudentPaymentLive.payment_sum), 0).label("total"),
         )
-        .join(G.PaymentTypes, G.PaymentTypes.id == G.StudentPayments.payment_type_id)
-        .filter(G.StudentPayments.payment == True)
+        .filter(GennisStudentPaymentLive.is_real_payment == True, GennisStudentPaymentLive.deleted == False)
     )
-    rows = _month_year_filter_gennis(rows, G.StudentPayments, month, year, from_date=from_date, to_date=to_date)
+    rows = _month_year_filter_gennis_local(rows, GennisStudentPaymentLive, GennisStudentPaymentLive.paid_date, month, year, from_date=from_date, to_date=to_date)
     if location_id:
-        rows = rows.filter(G.StudentPayments.location_id == location_id)
-    rows = rows.group_by(G.PaymentTypes.name).all()
+        rows = rows.filter(GennisStudentPaymentLive.location_id == location_id)
+    rows = rows.group_by(GennisStudentPaymentLive.channel).all()
 
-    by_type = [{"payment_type": r.name, "total": r.total} for r in rows]
+    by_type = [{"payment_type": r.channel, "total": r.total} for r in rows]
     grand_total = sum(r["total"] for r in by_type)
 
     return {"total": grand_total, "by_payment_type": by_type}
@@ -611,24 +639,24 @@ def gennis_teacher_salaries(
     month: Optional[int] = Query(None, ge=1, le=12),
     year: Optional[int] = Query(None, ge=2000),
     location_id: Optional[int] = Query(None),
-    db: Session = Depends(get_gennis_db),
+    db: Session = Depends(get_db),
     from_date: Optional[date] = Query(None),
     to_date: Optional[date] = Query(None),
 ):
-    """Teacher salary transactions in Gennis — total + breakdown by payment type."""
+    """Teacher salary transactions in Gennis — total + breakdown by payment channel."""
     rows = (
         db.query(
-            G.PaymentTypes.name,
-            func.coalesce(func.sum(G.TeacherSalaries.payment_sum), 0).label("total"),
+            GennisTeacherSalaryPaymentLive.channel,
+            func.coalesce(func.sum(GennisTeacherSalaryPaymentLive.payment_sum), 0).label("total"),
         )
-        .join(G.PaymentTypes, G.PaymentTypes.id == G.TeacherSalaries.payment_type_id)
+        .filter(GennisTeacherSalaryPaymentLive.deleted == False)
     )
-    rows = _month_year_filter_gennis(rows, G.TeacherSalaries, month, year, from_date=from_date, to_date=to_date)
+    rows = _month_year_filter_gennis_local(rows, GennisTeacherSalaryPaymentLive, GennisTeacherSalaryPaymentLive.paid_date, month, year, from_date=from_date, to_date=to_date)
     if location_id:
-        rows = rows.filter(G.TeacherSalaries.location_id == location_id)
-    rows = rows.group_by(G.PaymentTypes.name).all()
+        rows = rows.filter(GennisTeacherSalaryPaymentLive.location_id == location_id)
+    rows = rows.group_by(GennisTeacherSalaryPaymentLive.channel).all()
 
-    by_type = [{"payment_type": r.name, "total": r.total} for r in rows]
+    by_type = [{"payment_type": r.channel, "total": r.total} for r in rows]
     grand_total = sum(r["total"] for r in by_type)
 
     return {"total": grand_total, "by_payment_type": by_type}
@@ -639,24 +667,24 @@ def gennis_staff_salaries(
     month: Optional[int] = Query(None, ge=1, le=12),
     year: Optional[int] = Query(None, ge=2000),
     location_id: Optional[int] = Query(None),
-    db: Session = Depends(get_gennis_db),
+    db: Session = Depends(get_db),
     from_date: Optional[date] = Query(None),
     to_date: Optional[date] = Query(None),
 ):
-    """Staff salary transactions in Gennis — total + breakdown by payment type."""
+    """Staff salary transactions in Gennis — total + breakdown by payment channel."""
     rows = (
         db.query(
-            G.PaymentTypes.name,
-            func.coalesce(func.sum(G.StaffSalaries.payment_sum), 0).label("total"),
+            GennisStaffSalaryPaymentLive.channel,
+            func.coalesce(func.sum(GennisStaffSalaryPaymentLive.payment_sum), 0).label("total"),
         )
-        .join(G.PaymentTypes, G.PaymentTypes.id == G.StaffSalaries.payment_type_id)
+        .filter(GennisStaffSalaryPaymentLive.deleted == False)
     )
-    rows = _month_year_filter_gennis(rows, G.StaffSalaries, month, year, from_date=from_date, to_date=to_date)
+    rows = _month_year_filter_gennis_local(rows, GennisStaffSalaryPaymentLive, GennisStaffSalaryPaymentLive.paid_date, month, year, from_date=from_date, to_date=to_date)
     if location_id:
-        rows = rows.filter(G.StaffSalaries.location_id == location_id)
-    rows = rows.group_by(G.PaymentTypes.name).all()
+        rows = rows.filter(GennisStaffSalaryPaymentLive.location_id == location_id)
+    rows = rows.group_by(GennisStaffSalaryPaymentLive.channel).all()
 
-    by_type = [{"payment_type": r.name, "total": r.total} for r in rows]
+    by_type = [{"payment_type": r.channel, "total": r.total} for r in rows]
     grand_total = sum(r["total"] for r in by_type)
 
     return {"total": grand_total, "by_payment_type": by_type}
@@ -667,42 +695,43 @@ def gennis_overheads(
     month: Optional[int] = Query(None, ge=1, le=12),
     year: Optional[int] = Query(None, ge=2000),
     location_id: Optional[int] = Query(None),
-    db: Session = Depends(get_gennis_db),
+    db: Session = Depends(get_db),
     from_date: Optional[date] = Query(None),
     to_date: Optional[date] = Query(None),
 ):
-    """Overhead expenses in Gennis — total + breakdown by overhead item name + by payment type."""
+    """Overhead expenses in Gennis — total + breakdown by overhead item name + by payment channel."""
     # by item name
     item_rows = (
         db.query(
-            G.Overhead.item_name,
-            func.coalesce(func.sum(G.Overhead.item_sum), 0).label("total"),
+            GennisOverheadLive.item_name,
+            func.coalesce(func.sum(GennisOverheadLive.item_sum), 0).label("total"),
         )
+        .filter(GennisOverheadLive.deleted == False)
     )
-    item_rows = _month_year_filter_gennis(item_rows, G.Overhead, month, year, from_date=from_date, to_date=to_date)
+    item_rows = _month_year_filter_gennis_local(item_rows, GennisOverheadLive, GennisOverheadLive.date, month, year, from_date=from_date, to_date=to_date)
     if location_id:
-        item_rows = item_rows.filter(G.Overhead.location_id == location_id)
-    item_rows = item_rows.group_by(G.Overhead.item_name).all()
+        item_rows = item_rows.filter(GennisOverheadLive.location_id == location_id)
+    item_rows = item_rows.group_by(GennisOverheadLive.item_name).all()
 
-    # by payment type
+    # by payment channel
     type_rows = (
         db.query(
-            G.PaymentTypes.name,
-            func.coalesce(func.sum(G.Overhead.item_sum), 0).label("total"),
+            GennisOverheadLive.channel,
+            func.coalesce(func.sum(GennisOverheadLive.item_sum), 0).label("total"),
         )
-        .join(G.PaymentTypes, G.PaymentTypes.id == G.Overhead.payment_type_id)
+        .filter(GennisOverheadLive.deleted == False)
     )
-    type_rows = _month_year_filter_gennis(type_rows, G.Overhead, month, year, from_date=from_date, to_date=to_date)
+    type_rows = _month_year_filter_gennis_local(type_rows, GennisOverheadLive, GennisOverheadLive.date, month, year, from_date=from_date, to_date=to_date)
     if location_id:
-        type_rows = type_rows.filter(G.Overhead.location_id == location_id)
-    type_rows = type_rows.group_by(G.PaymentTypes.name).all()
+        type_rows = type_rows.filter(GennisOverheadLive.location_id == location_id)
+    type_rows = type_rows.group_by(GennisOverheadLive.channel).all()
 
     grand_total = sum(r.total for r in item_rows)
 
     return {
         "total": grand_total,
         "by_item": [{"item": r.item_name, "total": r.total} for r in item_rows],
-        "by_payment_type": [{"payment_type": r.name, "total": r.total} for r in type_rows],
+        "by_payment_type": [{"payment_type": r.channel, "total": r.total} for r in type_rows],
     }
 
 
@@ -711,24 +740,24 @@ def gennis_capitals(
     month: Optional[int] = Query(None, ge=1, le=12),
     year: Optional[int] = Query(None, ge=2000),
     location_id: Optional[int] = Query(None),
-    db: Session = Depends(get_gennis_db),
+    db: Session = Depends(get_db),
     from_date: Optional[date] = Query(None),
     to_date: Optional[date] = Query(None),
 ):
-    """Capital expenditure in Gennis — total + breakdown by payment type."""
+    """Capital expenditure in Gennis — total + breakdown by payment channel."""
     rows = (
         db.query(
-            G.PaymentTypes.name,
-            func.coalesce(func.sum(G.CapitalExpenditure.item_sum), 0).label("total"),
+            GennisCapitalExpenditureLive.channel,
+            func.coalesce(func.sum(GennisCapitalExpenditureLive.item_sum), 0).label("total"),
         )
-        .join(G.PaymentTypes, G.PaymentTypes.id == G.CapitalExpenditure.payment_type_id)
+        .filter(GennisCapitalExpenditureLive.deleted == False)
     )
-    rows = _month_year_filter_gennis(rows, G.CapitalExpenditure, month, year, from_date=from_date, to_date=to_date)
+    rows = _month_year_filter_gennis_local(rows, GennisCapitalExpenditureLive, GennisCapitalExpenditureLive.date, month, year, from_date=from_date, to_date=to_date)
     if location_id:
-        rows = rows.filter(G.CapitalExpenditure.location_id == location_id)
-    rows = rows.group_by(G.PaymentTypes.name).all()
+        rows = rows.filter(GennisCapitalExpenditureLive.location_id == location_id)
+    rows = rows.group_by(GennisCapitalExpenditureLive.channel).all()
 
-    by_type = [{"payment_type": r.name, "total": r.total} for r in rows]
+    by_type = [{"payment_type": r.channel, "total": r.total} for r in rows]
     grand_total = sum(r["total"] for r in by_type)
     return {"total": grand_total, "by_payment_type": by_type}
 
@@ -738,24 +767,42 @@ def gennis_branch_transactions(
     month: Optional[int] = Query(None, ge=1, le=12),
     year: Optional[int] = Query(None, ge=2000),
     location_id: Optional[int] = Query(None),
-    db: Session = Depends(get_gennis_db),
+    db: Session = Depends(get_db),
     from_date: Optional[date] = Query(None),
     to_date: Optional[date] = Query(None),
 ):
-    """Branch transactions in Gennis — split by direction (give/receive) with per-payment-type breakdown."""
+    """Branch transactions in Gennis — split by direction (give/receive) with per-payment-type breakdown.
+
+    Unlike its siblings above, this table has no `channel` string and no
+    single date column — payment_type_id (FK to the shared payment_type
+    table) and calendar_day/month/year (plain integers) are what it has,
+    so from_date/to_date use make_date() to compose a real date to compare."""
     base = (
         db.query(
-            G.GennisBranchTransaction.is_give.label("is_give"),
-            G.PaymentTypes.name.label("payment_type"),
-            func.coalesce(func.sum(G.GennisBranchTransaction.amount), 0).label("total"),
+            GennisBranchTransactionLive.is_give.label("is_give"),
+            PaymentType.name.label("payment_type"),
+            func.coalesce(func.sum(GennisBranchTransactionLive.amount), 0).label("total"),
         )
-        .join(G.PaymentTypes, G.PaymentTypes.id == G.GennisBranchTransaction.payment_type_id)
-        .filter(G.GennisBranchTransaction.deleted == False)
+        .join(PaymentType, PaymentType.id == GennisBranchTransactionLive.payment_type_id)
+        .filter(GennisBranchTransactionLive.deleted == False)
     )
-    base = _month_year_filter_gennis(base, G.GennisBranchTransaction, month, year, from_date=from_date, to_date=to_date)
+    if month:
+        base = base.filter(GennisBranchTransactionLive.calendar_month == month)
+    if year:
+        base = base.filter(GennisBranchTransactionLive.calendar_year == year)
+    if from_date or to_date:
+        made_date = func.make_date(
+            GennisBranchTransactionLive.calendar_year,
+            GennisBranchTransactionLive.calendar_month,
+            GennisBranchTransactionLive.calendar_day,
+        )
+        if from_date:
+            base = base.filter(made_date >= from_date)
+        if to_date:
+            base = base.filter(made_date < to_date + timedelta(days=1))
     if location_id:
-        base = base.filter(G.GennisBranchTransaction.location_id == location_id)
-    rows = base.group_by(G.GennisBranchTransaction.is_give, G.PaymentTypes.name).all()
+        base = base.filter(GennisBranchTransactionLive.location_id == location_id)
+    rows = base.group_by(GennisBranchTransactionLive.is_give, PaymentType.name).all()
 
     give_by_type: List[dict] = []
     receive_by_type: List[dict] = []
@@ -777,8 +824,7 @@ def gennis_summary(
     month: Optional[int] = Query(None, ge=1, le=12),
     year: Optional[int] = Query(None, ge=2000),
     location_id: Optional[int] = Query(None),
-    db: Session = Depends(get_gennis_db),
-    local_db: Session = Depends(get_db),
+    db: Session = Depends(get_db),
     from_date: Optional[date] = Query(None),
     to_date: Optional[date] = Query(None),
 ):
@@ -789,8 +835,8 @@ def gennis_summary(
     overheads = gennis_overheads(month, year, location_id, db, from_date=from_date, to_date=to_date)
     capitals = gennis_capitals(month, year, location_id, db, from_date=from_date, to_date=to_date)
     branch_transactions = gennis_branch_transactions(month, year, location_id, db, from_date=from_date, to_date=to_date)
-    dividends = _get_total(local_db, Dividend, "gennis", month, year, location_id=location_id, from_date=from_date, to_date=to_date)
-    investments = _get_total(local_db, Investment, "gennis", month, year, location_id=location_id, from_date=from_date, to_date=to_date)
+    dividends = _get_total(db, Dividend, "gennis", month, year, location_id=location_id, from_date=from_date, to_date=to_date)
+    investments = _get_total(db, Investment, "gennis", month, year, location_id=location_id, from_date=from_date, to_date=to_date)
 
     total_expenses = (
         teacher_salaries["total"] + staff_salaries["total"] + overheads["total"]
@@ -1079,13 +1125,12 @@ def overview(
     year: Optional[int] = Query(None, ge=2000),
     gennis_location_id: Optional[int] = Query(None),
     turon_branch_id: Optional[int] = Query(None),
-    gennis_db: Session = Depends(get_gennis_db),
     local_db: Session = Depends(get_db),
     from_date: Optional[date] = Query(None),
     to_date: Optional[date] = Query(None),
 ):
     """Director dashboard: combined stats from both systems."""
-    g = gennis_summary(month, year, gennis_location_id, gennis_db, local_db, from_date=from_date, to_date=to_date)
+    g = gennis_summary(month, year, gennis_location_id, local_db, from_date=from_date, to_date=to_date)
     t = turon_summary(month, year, turon_branch_id, local_db, from_date=from_date, to_date=to_date)
 
     total_payments = g["payments"]["total"] + t["payments"]["total"]

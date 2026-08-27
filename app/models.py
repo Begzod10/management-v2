@@ -2500,6 +2500,114 @@ class TuronStaffSalaryV2(Base):
     deleted          = Column(Boolean, default=False)
 
 
+# ── Gennis live tables (owned by gennis-v2's own Alembic chain, NOT this
+# project's — unlike turon-v2 these have no _v2 suffix, gennis-v2 just uses
+# management-v2's existing bare table names directly as its own operational
+# schema; extend_existing only, no migration here). Added for statistics.py's
+# Gennis dashboard fix — see conversation for the freshness verification
+# (gennis_student_payment has real payments dated today; old gennis has had
+# no real activity since 2026-08-19). Most of these tables carry a bare
+# `channel` string (cash/click/bank), not a payment_type_id FK — confirmed
+# by checking actual data: payment_type_id is NULL on ~99% of gennis_overhead
+# rows, so `channel` is the real source there despite the column existing.
+# gennis_branch_transaction is the one exception — payment_type_id IS fully
+# populated there and channel doesn't exist as a column at all. ───────────
+
+class GennisStudentPaymentLive(Base):
+    __tablename__ = "gennis_student_payment"
+    __table_args__ = {"extend_existing": True}
+
+    id              = Column(BigInteger, primary_key=True)
+    student_id      = Column(Integer, nullable=True)
+    location_id     = Column(Integer, nullable=True)
+    payment_sum     = Column(BigInteger, default=0)
+    channel         = Column(String(100), nullable=True)
+    # False = discount, matches old gennis's `payment` bool (True = real
+    # cash/bank/click payment) that statistics.py's gennis_payments() filters on.
+    is_real_payment = Column(Boolean, default=True)
+    paid_date       = Column(Date, nullable=True)
+    calendar_month  = Column(Integer, nullable=True)
+    calendar_year   = Column(Integer, nullable=True)
+    deleted         = Column(Boolean, default=False)
+
+
+class GennisOverheadLive(Base):
+    __tablename__ = "gennis_overhead"
+    __table_args__ = {"extend_existing": True}
+
+    id              = Column(BigInteger, primary_key=True)
+    item_name       = Column(String(500), nullable=False)
+    item_sum        = Column(BigInteger, default=0)
+    channel         = Column(String(100), nullable=True)
+    location_id     = Column(Integer, nullable=False)
+    date            = Column(Date, nullable=False)
+    calendar_month  = Column(Integer, nullable=False)
+    calendar_year   = Column(Integer, nullable=False)
+    deleted         = Column(Boolean, default=False)
+
+
+class GennisTeacherSalaryPaymentLive(Base):
+    __tablename__ = "gennis_teacher_salary_payment"
+    __table_args__ = {"extend_existing": True}
+
+    id              = Column(Integer, primary_key=True)
+    teacher_id      = Column(Integer, nullable=True)
+    location_id     = Column(Integer, nullable=True)
+    payment_sum     = Column(Integer, default=0)
+    channel         = Column(String(100), nullable=True)
+    paid_date       = Column(Date, nullable=True)
+    calendar_month  = Column(Integer, nullable=False)
+    calendar_year   = Column(Integer, nullable=False)
+    deleted         = Column(Boolean, default=False)
+
+
+class GennisStaffSalaryPaymentLive(Base):
+    __tablename__ = "gennis_staff_salary_payment"
+    __table_args__ = {"extend_existing": True}
+
+    id              = Column(Integer, primary_key=True)
+    staff_id        = Column(Integer, nullable=True)
+    location_id     = Column(Integer, nullable=True)
+    payment_sum     = Column(Integer, default=0)
+    channel         = Column(String(100), nullable=True)
+    paid_date       = Column(Date, nullable=True)
+    calendar_month  = Column(Integer, nullable=False)
+    calendar_year   = Column(Integer, nullable=False)
+    deleted         = Column(Boolean, default=False)
+
+
+class GennisCapitalExpenditureLive(Base):
+    __tablename__ = "gennis_capital_expenditure"
+    __table_args__ = {"extend_existing": True}
+
+    id              = Column(BigInteger, primary_key=True)
+    item_sum        = Column(BigInteger, nullable=False)
+    channel         = Column(String(100), nullable=True)
+    location_id     = Column(Integer, nullable=False)
+    date            = Column(Date, nullable=False)
+    calendar_month  = Column(Integer, nullable=False)
+    calendar_year   = Column(Integer, nullable=False)
+    deleted         = Column(Boolean, default=False)
+
+
+class GennisBranchTransactionLive(Base):
+    """Unlike its siblings above, this one has no `channel` column —
+    payment_type_id (FK to the shared payment_type table, same one
+    turon_*_v2 uses) is fully populated and is the real source here."""
+    __tablename__ = "gennis_branch_transaction"
+    __table_args__ = {"extend_existing": True}
+
+    id              = Column(BigInteger, primary_key=True)
+    amount          = Column(BigInteger, nullable=False)
+    is_give         = Column(Boolean, nullable=False)
+    payment_type_id = Column(Integer, ForeignKey("payment_type.id"), nullable=True)
+    location_id     = Column(Integer, nullable=False)
+    calendar_day    = Column(Integer, nullable=False)
+    calendar_month  = Column(Integer, nullable=False)
+    calendar_year   = Column(Integer, nullable=False)
+    deleted         = Column(Boolean, default=False)
+
+
 class GennisStudentCharity(Base):
     __tablename__ = "gennis_student_charity"
     __table_args__ = {"extend_existing": True}
