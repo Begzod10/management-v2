@@ -2608,6 +2608,114 @@ class GennisBranchTransactionLive(Base):
     deleted         = Column(Boolean, default=False)
 
 
+# ── Gennis live tables, part 2 (added for gennis/detail.py — see
+# conversation). Same "no _v2 suffix, bare gennis-v2-owned table name"
+# caveat as the block above. NOTE: gennis_teacher/gennis_staff (the
+# flattened name/role/location directory) were checked and found stale —
+# last synced 2026-08-11, 8 days before old gennis itself went quiet, with
+# no native gennis-v2 write path (its own registration flow only touches
+# gennis_teacher_registration, 6 rows total) — so /directors, /teachers,
+# /staff, /employees stay on the external connection. Everything below is
+# confirmed synced_at TODAY at investigation time. ─────────────────────────
+
+class GennisAttendanceHistoryStudentLive(Base):
+    """student_name/group_name are denormalized directly on the row — no
+    join to a student/group/user table needed for the debtors listing."""
+    __tablename__ = "gennis_attendance_history_student"
+    __table_args__ = {"extend_existing": True}
+
+    id             = Column(BigInteger, primary_key=True)
+    student_id     = Column(Integer, nullable=False)
+    student_name   = Column(String(511), nullable=True)
+    group_id       = Column(Integer, nullable=True)
+    group_name     = Column(String(255), nullable=True)
+    subject_id     = Column(Integer, nullable=True)
+    total_debt     = Column(Integer, default=0)
+    payment        = Column(Integer, default=0)
+    remaining_debt = Column(Integer, default=0)
+    total_discount = Column(Integer, default=0)
+    location_id    = Column(Integer, nullable=True)
+    calendar_month = Column(Integer, nullable=False)
+    calendar_year  = Column(Integer, nullable=False)
+
+
+class GennisDeletedStudentGroupLive(Base):
+    """No deletion-date column (unlike old gennis's DeletedStudents +
+    CalendarDay join) — existence of a row here is enough to mark
+    is_deleted, but there's no date to surface alongside it.
+
+    student_id/group_id keep their real FK references (matching the DB's
+    actual constraints) because GennisGroup.deleted_students above already
+    uses this table name as a secondary association — dropping the FKs
+    here (extend_existing merges into the same table metadata) broke that
+    relationship's auto-join-detection at import time."""
+    __tablename__ = "gennis_deleted_student_group"
+    __table_args__ = {"extend_existing": True}
+
+    id         = Column(BigInteger, primary_key=True)
+    student_id = Column(BigInteger, ForeignKey("gennis_student.id"), nullable=False)
+    group_id   = Column(BigInteger, ForeignKey("gennis_group.id"), nullable=False)
+
+
+class GennisTeacherSalaryLive(Base):
+    """Pre-computed — black_salary/debt/fine/remaining_salary already
+    baked into the row per month, unlike old gennis where these needed
+    separate TeacherBlackSalary joins and deleted-cutoff-date logic."""
+    __tablename__ = "gennis_teacher_salary"
+    __table_args__ = {"extend_existing": True}
+
+    id               = Column(Integer, primary_key=True)
+    teacher_id       = Column(Integer, nullable=True)
+    teacher_name     = Column(String(511), nullable=True)
+    location_id      = Column(Integer, nullable=True)
+    total_salary     = Column(Integer, default=0)
+    taken_money      = Column(Integer, default=0)
+    black_salary     = Column(Integer, default=0)
+    debt             = Column(Integer, default=0)
+    fine             = Column(Integer, default=0)
+    remaining_salary = Column(Integer, default=0)
+    is_deleted       = Column(Boolean, default=False)
+    calendar_month   = Column(Integer, nullable=False)
+    calendar_year    = Column(Integer, nullable=False)
+
+
+class GennisAssistentSalaryLive(Base):
+    __tablename__ = "gennis_assistent_salary"
+    __table_args__ = {"extend_existing": True}
+
+    id               = Column(Integer, primary_key=True)
+    assistent_id     = Column(Integer, nullable=True)
+    assistent_name   = Column(String(511), nullable=True)
+    location_id      = Column(Integer, nullable=True)
+    total_salary     = Column(Integer, default=0)
+    taken_money      = Column(Integer, default=0)
+    black_salary     = Column(Integer, default=0)
+    debt             = Column(Integer, default=0)
+    fine             = Column(Integer, default=0)
+    remaining_salary = Column(Integer, default=0)
+    is_deleted       = Column(Boolean, default=False)
+    calendar_month   = Column(Integer, nullable=False)
+    calendar_year    = Column(Integer, nullable=False)
+
+
+class GennisStaffSalaryLive(Base):
+    __tablename__ = "gennis_staff_salary"
+    __table_args__ = {"extend_existing": True}
+
+    id               = Column(Integer, primary_key=True)
+    staff_id         = Column(Integer, nullable=True)
+    staff_name       = Column(String(511), nullable=True)
+    location_id      = Column(Integer, nullable=True)
+    total_salary     = Column(Integer, default=0)
+    taken_money      = Column(Integer, default=0)
+    remaining_salary = Column(Integer, default=0)
+    is_deleted       = Column(Boolean, default=False)
+    deleted_date     = Column(DateTime, nullable=True)
+    deleted_comment  = Column(Text, nullable=True)
+    calendar_month   = Column(Integer, nullable=False)
+    calendar_year    = Column(Integer, nullable=False)
+
+
 class GennisStudentCharity(Base):
     __tablename__ = "gennis_student_charity"
     __table_args__ = {"extend_existing": True}

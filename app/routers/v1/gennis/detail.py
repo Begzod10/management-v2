@@ -1,6 +1,22 @@
 """
 Detailed per-record views for the Gennis education center.
 Mirrors account/overal_datas/home_screen.py from the Gennis project.
+
+/branches, /debtors, /salaries, /overhead read locally (get_db) from
+gennis-v2's own tables — same reasoning as the Turon dashboard/detail
+fixes: old gennis has had no real activity since 2026-08-19, gennis-v2 is
+the live system now, and these specific tables already live in this same
+DB, confirmed synced_at TODAY at investigation time (see conversation).
+
+/directors, /teachers, /staff, /employees/{location_id} stay on the
+external DB (get_gennis_db) — checked and found a genuine gap, not just
+freshness noise: gennis_teacher/gennis_staff (the flattened name/role/
+location directory these need) last synced 2026-08-11, 8 days before old
+gennis itself went quiet, and gennis-v2 has no native write path into
+them (its own registration flow only touches gennis_teacher_registration,
+which has 6 rows total — nowhere near a full directory). Switching these
+would mean showing an already-stale picture that can only get staler,
+since nothing updates either the old or the local copy anymore.
 """
 from collections import defaultdict
 from datetime import datetime
@@ -9,8 +25,19 @@ from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_
 
-from app.database import get_gennis_db
+from app.database import get_gennis_db, get_db
 from app.external_models import gennis as G
+from app.models import (
+    GennisLocation,
+    GennisSubject,
+    GennisAttendanceHistoryStudentLive,
+    GennisDeletedStudentGroupLive,
+    GennisStudentPaymentLive,
+    GennisTeacherSalaryLive,
+    GennisAssistentSalaryLive,
+    GennisStaffSalaryLive,
+    GennisOverheadLive,
+)
 from typing import List, Optional, Union
 from app.schemas_stats import (
     BranchItem,
@@ -25,13 +52,17 @@ router = APIRouter(prefix="/gennis", tags=["Gennis Detail"])
 # ── Branches ──────────────────────────────────────────────────────────────────
 
 @router.get("/branches", response_model=List[BranchItem])
-def gennis_branches(db: Session = Depends(get_gennis_db)):
-    """List all Gennis locations (branches)."""
-    rows = db.query(G.Locations).order_by(G.Locations.id).all()
-    return [{"id": r.id, "name": r.name} for r in rows]
+def gennis_branches(db: Session = Depends(get_db)):
+    """List all Gennis locations (branches). Returns gennis_id, not the
+    local autoincrement id — every other gennis_* table's location_id
+    column stores gennis_id directly (verified: 1-5, matching old gennis's
+    own Locations numbering)."""
+    rows = db.query(GennisLocation).order_by(GennisLocation.gennis_id).all()
+    return [{"id": r.gennis_id, "name": r.name} for r in rows]
 
 
 # ── People lists ─────────────────────────────────────────────────────────────
+# Stays external — see module docstring.
 
 @router.get("/directors")
 def gennis_directors(
@@ -204,31 +235,6 @@ def gennis_employees(
     }
 
 
-# ── helpers ───────────────────────────────────────────────────────────────────
-
-def _resolve_month_year(db: Session, month: int, year: int):
-    """Return (month_id, year_id) from the Gennis calendar tables."""
-    year_obj = datetime.strptime(str(year), "%Y")
-    month_obj = datetime.strptime(f"{year}-{month:02d}", "%Y-%m")
-
-    year_row = db.query(G.CalendarYear).filter(G.CalendarYear.date == year_obj).first()
-    if not year_row:
-        raise HTTPException(status_code=404, detail=f"Calendar year {year} not found")
-
-    month_row = (
-        db.query(G.CalendarMonth)
-        .filter(
-            G.CalendarMonth.date == month_obj,
-            G.CalendarMonth.year_id == year_row.id,
-        )
-        .first()
-    )
-    if not month_row:
-        raise HTTPException(status_code=404, detail=f"Calendar month {year}-{month} not found")
-
-    return month_row.id, year_row.id
-
-
 # ── Debtors ───────────────────────────────────────────────────────────────────
 
 @router.get("/debtors", response_model=GennisDebtorsOut)
@@ -236,56 +242,66 @@ def gennis_debtors(
     location_id: int = Query(...),
     month: int = Query(..., ge=1, le=12),
     year: int = Query(..., ge=2000),
-    db: Session = Depends(get_gennis_db),
+    db: Session = Depends(get_db),
 ):
-    month_id, year_id = _resolve_month_year(db, month, year)
+    """Same shape as before, reading gennis-v2's own attendance-history
+    table — which carries student_name/group_name denormalized directly,
+    so no join to a student/group/user table is needed."""
     month_date_obj = datetime.strptime(f"{year}-{month:02d}", "%Y-%m")
 
-    # ── Attendance records ────────────────────────────────────────────────────
     attendance_records = (
-        db.query(
-            G.AttendanceHistoryStudent,
-            G.Students,
-            G.Users,
-            G.Groups,
-            G.Subjects,
-        )
-        .join(G.Students, G.AttendanceHistoryStudent.student_id == G.Students.id)
-        .join(G.Users, G.Students.user_id == G.Users.id)
-        .join(G.Groups, G.AttendanceHistoryStudent.group_id == G.Groups.id)
-        .join(G.Subjects, G.Groups.subject_id == G.Subjects.id)
+        db.query(GennisAttendanceHistoryStudentLive)
         .filter(
-            G.AttendanceHistoryStudent.calendar_month == month_id,
-            G.AttendanceHistoryStudent.calendar_year == year_id,
-            G.Users.location_id == location_id,
+            GennisAttendanceHistoryStudentLive.calendar_month == month,
+            GennisAttendanceHistoryStudentLive.calendar_year == year,
+            GennisAttendanceHistoryStudentLive.location_id == location_id,
         )
-        .order_by(G.Students.id)
+        .order_by(GennisAttendanceHistoryStudentLive.student_id)
         .all()
     )
 
-    student_ids = [r[1].id for r in attendance_records]
+    student_ids = [r.student_id for r in attendance_records]
+    subject_ids = {r.subject_id for r in attendance_records if r.subject_id is not None}
 
-    # ── Deleted students info (batch) ─────────────────────────────────────────
-    deleted_rows = (
-        db.query(G.DeletedStudents.student_id, G.CalendarDay.date)
-        .join(G.CalendarDay, G.DeletedStudents.calendar_day == G.CalendarDay.id)
-        .filter(G.DeletedStudents.student_id.in_(student_ids))
+    # subject_id on the attendance row is inconsistent — confirmed some
+    # rows match GennisSubject.gennis_id, others match its local id
+    # directly (a sync artifact: 61,724 rows by gennis_id vs 8,412 by
+    # local id, out of 70,838) — try both, prefer gennis_id (the majority).
+    subj_by_gennis_id = dict(
+        db.query(GennisSubject.gennis_id, GennisSubject.name)
+        .filter(GennisSubject.gennis_id.in_(subject_ids)).all()
+    ) if subject_ids else {}
+    subj_by_local_id = dict(
+        db.query(GennisSubject.id, GennisSubject.name)
+        .filter(GennisSubject.id.in_(subject_ids)).all()
+    ) if subject_ids else {}
+
+    def _subject_name(sid):
+        if sid is None:
+            return "—"
+        return subj_by_gennis_id.get(sid) or subj_by_local_id.get(sid) or "—"
+
+    # ── Deleted students (batch) — no deletion date available locally
+    # (unlike old gennis's DeletedStudents + CalendarDay join) ────────────────
+    deleted_ids = {
+        row.student_id for row in
+        db.query(GennisDeletedStudentGroupLive.student_id)
+        .filter(GennisDeletedStudentGroupLive.student_id.in_(student_ids))
         .all()
-    )
-    deleted_students_info = {row.student_id: row.date for row in deleted_rows}
+    } if student_ids else set()
 
     # ── Discounts per student (batch) ─────────────────────────────────────────
     discount_rows = (
-        db.query(G.StudentPayments.student_id, G.StudentPayments.payment_sum)
+        db.query(GennisStudentPaymentLive.student_id, GennisStudentPaymentLive.payment_sum)
         .filter(
-            G.StudentPayments.student_id.in_(student_ids),
-            G.StudentPayments.calendar_month == month_id,
-            G.StudentPayments.calendar_year == year_id,
-            G.StudentPayments.location_id == location_id,
-            G.StudentPayments.payment == False,
+            GennisStudentPaymentLive.student_id.in_(student_ids),
+            GennisStudentPaymentLive.calendar_month == month,
+            GennisStudentPaymentLive.calendar_year == year,
+            GennisStudentPaymentLive.location_id == location_id,
+            GennisStudentPaymentLive.is_real_payment == False,
         )
         .all()
-    )
+    ) if student_ids else []
     discounts_by_student: dict = defaultdict(int)
     for row in discount_rows:
         discounts_by_student[row.student_id] += row.payment_sum or 0
@@ -294,32 +310,31 @@ def gennis_debtors(
     students_dict = {}
     total_debt = payment = total_discount = total_first_discount = 0
 
-    for attendance, student, user, group, subject in attendance_records:
-        for_student_total_discount = discounts_by_student[student.id]
+    for attendance in attendance_records:
+        for_student_total_discount = discounts_by_student[attendance.student_id]
         total_first_discount += for_student_total_discount
 
-        if student.id not in students_dict:
-            deletion_date = deleted_students_info.get(student.id)
-            students_dict[student.id] = {
-                "id": student.id,
-                "student_name": f"{user.name} {user.surname}",
+        if attendance.student_id not in students_dict:
+            students_dict[attendance.student_id] = {
+                "id": attendance.student_id,
+                "student_name": attendance.student_name or "",
                 "month": month_date_obj.strftime("%Y-%m"),
-                "is_deleted": student.id in deleted_students_info,
-                "deleted_date": deletion_date.strftime("%Y-%m-%d") if deletion_date else None,
+                "is_deleted": attendance.student_id in deleted_ids,
+                "deleted_date": None,
                 "groups": [],
             }
 
-        total_debt    += attendance.total_debt     or 0
-        payment       += attendance.payment        or 0
-        total_discount += attendance.total_discount or 0
+        total_debt      += attendance.total_debt     or 0
+        payment         += attendance.payment        or 0
+        total_discount  += attendance.total_discount or 0
 
-        students_dict[student.id]["groups"].append({
-            "group_name":               group.name,
-            "subject_name":             subject.name,
-            "remaining_debt":           attendance.remaining_debt   or 0,
-            "total_debt":               attendance.total_debt       or 0,
-            "payment":                  attendance.payment          or 0,
-            "total_discount":           attendance.total_discount   or 0,
+        students_dict[attendance.student_id]["groups"].append({
+            "group_name":               attendance.group_name or "",
+            "subject_name":             _subject_name(attendance.subject_id),
+            "remaining_debt":           attendance.remaining_debt or 0,
+            "total_debt":               attendance.total_debt or 0,
+            "payment":                  attendance.payment or 0,
+            "total_discount":           attendance.total_discount or 0,
             "for_student_total_discount": for_student_total_discount,
         })
 
@@ -341,172 +356,88 @@ def gennis_salaries(
     month: int = Query(..., ge=1, le=12),
     year: int = Query(..., ge=2000),
     type_salary: str = Query(..., pattern="^(teacher|assistent|staff)$"),
-    db: Session = Depends(get_gennis_db),
+    db: Session = Depends(get_db),
 ):
-    month_id, year_id = _resolve_month_year(db, month, year)
+    """gennis-v2's monthly salary tables already carry black_salary/debt/
+    fine/remaining_salary/is_deleted pre-computed per row — no separate
+    black-salary join or deleted-cutoff-date logic needed, unlike old
+    gennis's raw TeacherSalary + TeacherBlackSalary + DeletedTeachers."""
     month_date_obj = datetime.strptime(f"{year}-{month:02d}", "%Y-%m")
 
-    # ── Teacher ───────────────────────────────────────────────────────────────
     if type_salary == "teacher":
-        salary_records = (
-            db.query(
-                G.TeacherSalary,
-                G.Teachers,
-                G.Users,
-                G.CalendarMonth,
-                G.CalendarYear,
-                G.DeletedTeachers,
-            )
-            .join(G.Teachers, G.TeacherSalary.teacher_id == G.Teachers.id)
-            .join(G.Users, G.Teachers.user_id == G.Users.id)
-            .join(G.CalendarMonth, G.TeacherSalary.calendar_month == G.CalendarMonth.id)
-            .join(G.CalendarYear, G.CalendarMonth.year_id == G.CalendarYear.id)
-            .outerjoin(G.DeletedTeachers, G.Teachers.id == G.DeletedTeachers.teacher_id)
+        rows = (
+            db.query(GennisTeacherSalaryLive)
             .filter(
-                G.TeacherSalary.calendar_month == month_id,
-                G.TeacherSalary.calendar_year == year_id,
-                G.Users.location_id == location_id,
-                G.TeacherSalary.location_id == location_id,
-                or_(
-                    G.DeletedTeachers.id == None,
-                    G.CalendarMonth.date > month_date_obj,
-                ),
+                GennisTeacherSalaryLive.calendar_month == month,
+                GennisTeacherSalaryLive.calendar_year == year,
+                GennisTeacherSalaryLive.location_id == location_id,
             )
             .all()
         )
-
-        teacher_ids = [r[1].id for r in salary_records]
-
-        # batch-fetch black salaries for this month
-        black_rows = (
-            db.query(G.TeacherBlackSalary.teacher_id, G.TeacherBlackSalary.total_salary)
-            .filter(
-                G.TeacherBlackSalary.teacher_id.in_(teacher_ids),
-                G.TeacherBlackSalary.calendar_month == month_id,
-                G.TeacherBlackSalary.location_id == location_id,
-                G.TeacherBlackSalary.status == False,
-            )
-            .all()
-        )
-        black_by_teacher: dict = defaultdict(int)
-        for row in black_rows:
-            black_by_teacher[row.teacher_id] += row.total_salary or 0
-
         salary_dict = {}
         total_salary = total_taken = total_black = total_debt = total_fine = total_remaining = 0
-
-        for salary, teacher, user, cal_month, cal_year, deleted_teacher in salary_records:
-            black_salary = black_by_teacher[teacher.id]
-            debt        = salary.debt       or 0
-            taken_money = salary.taken_money or 0
-            fine        = salary.total_fine  or 0
-            remaining   = salary.total_salary - (taken_money + black_salary + fine - debt)
-
-            salary_dict[teacher.id] = {
-                "id":               teacher.id,
-                "teacher_name":     f"{user.name} {user.surname}",
+        for s in rows:
+            salary_dict[s.teacher_id] = {
+                "id":               s.teacher_id,
+                "teacher_name":     s.teacher_name or "",
                 "month":            month_date_obj.strftime("%Y-%m"),
-                "is_deleted":       deleted_teacher is not None,
-                "deleted_date":     cal_year.date.strftime("%Y-%m") if deleted_teacher else None,
-                "teacher_salary":   salary.total_salary,
-                "taken_money":      taken_money,
-                "remaining_salary": remaining,
-                "black_salary":     black_salary,
-                "debt":             debt,
-                "fine":             fine,
+                "is_deleted":       s.is_deleted,
+                "deleted_date":     None,
+                "teacher_salary":   s.total_salary,
+                "taken_money":      s.taken_money,
+                "remaining_salary": s.remaining_salary,
+                "black_salary":     s.black_salary,
+                "debt":             s.debt,
+                "fine":             s.fine,
             }
-            total_remaining += remaining
-            total_fine      += fine
-            total_debt      += debt
-            total_black     += black_salary
-            total_salary    += salary.total_salary
-            total_taken     += taken_money
+            total_remaining += s.remaining_salary or 0
+            total_fine      += s.fine or 0
+            total_debt      += s.debt or 0
+            total_black     += s.black_salary or 0
+            total_salary    += s.total_salary or 0
+            total_taken     += s.taken_money or 0
 
         return {
-            "salary_list":        list(salary_dict.values()),
-            "total_salary":       total_salary,
-            "taken_money":        total_taken,
-            "remaining_salary":   total_remaining,
-            "black_salary":       total_black,
-            "debt":               total_debt,
-            "fine":               total_fine,
+            "salary_list":      list(salary_dict.values()),
+            "total_salary":     total_salary,
+            "taken_money":      total_taken,
+            "remaining_salary": total_remaining,
+            "black_salary":     total_black,
+            "debt":             total_debt,
+            "fine":             total_fine,
         }
 
-    # ── Assistent ─────────────────────────────────────────────────────────────
     elif type_salary == "assistent":
-        salary_records = (
-            db.query(
-                G.AssistentSalary,
-                G.Assistent,
-                G.Users,
-                G.CalendarMonth,
-                G.CalendarYear,
-            )
-            .join(G.Assistent, G.AssistentSalary.assisten_id == G.Assistent.id)
-            .join(G.Users, G.Assistent.user_id == G.Users.id)
-            .join(G.CalendarMonth, G.AssistentSalary.calendar_month == G.CalendarMonth.id)
-            .join(G.CalendarYear, G.CalendarMonth.year_id == G.CalendarYear.id)
+        rows = (
+            db.query(GennisAssistentSalaryLive)
             .filter(
-                G.AssistentSalary.calendar_month == month_id,
-                G.AssistentSalary.calendar_year == year_id,
-                G.Users.location_id == location_id,
-                G.AssistentSalary.location_id == location_id,
-                or_(
-                    G.Assistent.deleted == False,
-                    G.Assistent.deleted == None,
-                    and_(
-                        G.Assistent.deleted == True,
-                        G.CalendarMonth.date > month_date_obj,
-                    ),
-                ),
+                GennisAssistentSalaryLive.calendar_month == month,
+                GennisAssistentSalaryLive.calendar_year == year,
+                GennisAssistentSalaryLive.location_id == location_id,
             )
             .all()
         )
-
-        assistent_ids = [r[1].id for r in salary_records]
-
-        black_rows = (
-            db.query(G.AssistentBlackSalary.assistent_id, G.AssistentBlackSalary.total_salary)
-            .filter(
-                G.AssistentBlackSalary.assistent_id.in_(assistent_ids),
-                G.AssistentBlackSalary.calendar_month == month_id,
-                G.AssistentBlackSalary.location_id == location_id,
-                G.AssistentBlackSalary.status == False,
-            )
-            .all()
-        )
-        black_by_assistent: dict = defaultdict(int)
-        for row in black_rows:
-            black_by_assistent[row.assistent_id] += row.total_salary or 0
-
         salary_dict = {}
         total_salary = total_taken = total_black = total_debt = total_fine = total_remaining = 0
-
-        for salary, assistent, user, cal_month, cal_year in salary_records:
-            black_salary = black_by_assistent[assistent.id]
-            debt        = salary.debt       or 0
-            taken_money = salary.taken_money or 0
-            fine        = salary.total_fine  or 0
-            remaining   = salary.total_salary - (taken_money + black_salary + fine - debt)
-
-            salary_dict[assistent.id] = {
-                "id":               assistent.id,
-                "assistent_name":   f"{user.name} {user.surname}",
+        for s in rows:
+            salary_dict[s.assistent_id] = {
+                "id":               s.assistent_id,
+                "assistent_name":   s.assistent_name or "",
                 "month":            month_date_obj.strftime("%Y-%m"),
-                "is_deleted":       assistent.deleted or False,
-                "assistent_salary": salary.total_salary,
-                "taken_money":      taken_money,
-                "remaining_salary": remaining,
-                "black_salary":     black_salary,
-                "debt":             debt,
-                "fine":             fine,
+                "is_deleted":       s.is_deleted,
+                "assistent_salary": s.total_salary,
+                "taken_money":      s.taken_money,
+                "remaining_salary": s.remaining_salary,
+                "black_salary":     s.black_salary,
+                "debt":             s.debt,
+                "fine":             s.fine,
             }
-            total_remaining += remaining
-            total_fine      += fine
-            total_debt      += debt
-            total_black     += black_salary
-            total_salary    += salary.total_salary
-            total_taken     += taken_money
+            total_remaining += s.remaining_salary or 0
+            total_fine      += s.fine or 0
+            total_debt      += s.debt or 0
+            total_black     += s.black_salary or 0
+            total_salary    += s.total_salary or 0
+            total_taken     += s.taken_money or 0
 
         return {
             "salary_list":      list(salary_dict.values()),
@@ -520,53 +451,32 @@ def gennis_salaries(
 
     # ── Staff ─────────────────────────────────────────────────────────────────
     else:
-        salary_records = (
-            db.query(
-                G.StaffSalary,
-                G.Staff,
-                G.Users,
-                G.CalendarMonth,
-                G.CalendarYear,
-            )
-            .join(G.Staff, G.StaffSalary.staff_id == G.Staff.id)
-            .join(G.Users, G.Staff.user_id == G.Users.id)
-            .join(G.CalendarMonth, G.StaffSalary.calendar_month == G.CalendarMonth.id)
-            .join(G.CalendarYear, G.CalendarMonth.year_id == G.CalendarYear.id)
+        rows = (
+            db.query(GennisStaffSalaryLive)
             .filter(
-                G.StaffSalary.calendar_month == month_id,
-                G.StaffSalary.calendar_year == year_id,
-                G.Users.location_id == location_id,
-                or_(
-                    G.Staff.deleted == False,
-                    G.Staff.deleted == None,
-                    and_(
-                        G.Staff.deleted == True,
-                        G.CalendarMonth.date > month_date_obj,
-                    ),
-                ),
+                GennisStaffSalaryLive.calendar_month == month,
+                GennisStaffSalaryLive.calendar_year == year,
+                GennisStaffSalaryLive.location_id == location_id,
             )
             .all()
         )
-
         salary_dict = {}
         total_salary = total_taken = 0
-
-        for salary, staff, user, cal_month, cal_year in salary_records:
-            taken_money = salary.taken_money or 0
-            if staff.id not in salary_dict:
-                salary_dict[staff.id] = {
-                    "id":               staff.id,
-                    "staff_name":       f"{user.name} {user.surname}",
+        for s in rows:
+            if s.staff_id not in salary_dict:
+                salary_dict[s.staff_id] = {
+                    "id":               s.staff_id,
+                    "staff_name":       s.staff_name or "",
                     "month":            month_date_obj.strftime("%Y-%m"),
-                    "is_deleted":       staff.deleted,
-                    "deleted_date":     staff.deleted_date.strftime("%Y-%m") if staff.deleted_date else None,
-                    "deleted_comment":  staff.deleted_comment,
-                    "staff_salary":     salary.total_salary,
-                    "taken_money":      taken_money,
-                    "remaining_salary": salary.total_salary - taken_money,
+                    "is_deleted":       s.is_deleted,
+                    "deleted_date":     s.deleted_date.strftime("%Y-%m") if s.deleted_date else None,
+                    "deleted_comment":  s.deleted_comment,
+                    "staff_salary":     s.total_salary,
+                    "taken_money":      s.taken_money,
+                    "remaining_salary": s.remaining_salary,
                 }
-            total_salary += salary.total_salary
-            total_taken  += taken_money
+            total_salary += s.total_salary or 0
+            total_taken  += s.taken_money or 0
 
         return {
             "salary_list":      list(salary_dict.values()),
@@ -583,18 +493,17 @@ def gennis_overhead(
     location_id: int = Query(...),
     month: int = Query(..., ge=1, le=12),
     year: int = Query(..., ge=2000),
-    db: Session = Depends(get_gennis_db),
+    db: Session = Depends(get_db),
 ):
-    month_id, year_id = _resolve_month_year(db, month, year)
     month_date_obj = datetime.strptime(f"{year}-{month:02d}", "%Y-%m")
 
     all_overheads = (
-        db.query(G.Overhead, G.PaymentTypes)
-        .join(G.PaymentTypes, G.PaymentTypes.id == G.Overhead.payment_type_id)
+        db.query(GennisOverheadLive)
         .filter(
-            G.Overhead.calendar_month == month_id,
-            G.Overhead.calendar_year == year_id,
-            G.Overhead.location_id == location_id,
+            GennisOverheadLive.calendar_month == month,
+            GennisOverheadLive.calendar_year == year,
+            GennisOverheadLive.location_id == location_id,
+            GennisOverheadLive.deleted == False,
         )
         .all()
     )
@@ -602,7 +511,7 @@ def gennis_overhead(
     total_gaz = total_svet = total_suv = total_arenda = total_other = 0
     overhead_list = []
 
-    for overhead, payment_type in all_overheads:
+    for overhead in all_overheads:
         item_sum = overhead.item_sum or 0
         name = (overhead.item_name or "").lower()
 
@@ -617,7 +526,7 @@ def gennis_overhead(
             "item_name":    overhead.item_name,
             "item_sum":     item_sum,
             "month":        month_date_obj.strftime("%Y-%m"),
-            "payment_type": payment_type.name,
+            "payment_type": overhead.channel or "",
         })
 
     return {
