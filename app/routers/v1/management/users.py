@@ -48,10 +48,27 @@ def create_user(data: UserCreate, db: Session = Depends(get_db)):
 
 
 @router.get("/", response_model=List[UserOut])
-def list_users(role: str = None, deleted: bool = False, db: Session = Depends(get_db)):
+def list_users(
+    role: str = None,
+    deleted: bool = False,
+    exclude_non_staff: bool = Query(
+        False,
+        description=(
+            "Drop gennis/turon-synced accounts (student/teacher/parent/assistant) "
+            "before returning. Default False keeps every existing caller's "
+            "behavior unchanged — this table is 18k+ rows, 17.7k of them "
+            "students, and every task/project 'assign to' picker used to fetch "
+            "it unfiltered and filter client-side, shipping a ~3.5MB payload "
+            "and freezing the tab on every open. Pass true from a picker."
+        ),
+    ),
+    db: Session = Depends(get_db),
+):
     q = db.query(User).filter(User.deleted == deleted)
     if role:
         q = q.filter(User.role == role)
+    if exclude_non_staff:
+        q = q.filter(User.role.notin_(_NON_STAFF_ROLES))
     return q.all()
 
 

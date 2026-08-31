@@ -529,7 +529,10 @@ export function CreateTaskDialog({ open, onOpenChange, onCreated, editTask }: Cr
       } catch { return []; }
     };
 
-    const mgmt = await fetchJson("/users/");
+    // exclude_non_staff=true — /users/ is 18.5k+ rows (mostly synced
+    // gennis/turon students); fetching it unfiltered here downloaded a
+    // ~3.5MB payload and froze the tab every time this dialog opened.
+    const mgmt = await fetchJson("/users/?exclude_non_staff=true");
     setManagementUsers(mgmt);
 
     if (myRole === "manager") {
