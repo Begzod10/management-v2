@@ -5,7 +5,7 @@ from typing import List, Optional
 from datetime import datetime, date, timedelta
 from app.database import get_db, get_gennis_db, get_turon_db, get_gennis_write_db, get_turon_write_db
 from app.dependencies import has_role
-from app.models import Mission, MissionHistory, MissionSubtask, Tag, User, ProjectMember, Branch, Project, Section, SectionMember, Job, MobileTelegramLink
+from app.models import Mission, MissionHistory, MissionSubtask, Tag, User, ProjectMember, Branch, Project, Section, SectionMember, Job, MobileTelegramLink, GennisUserLink, TuronUserLink
 from app.services.openai_assistant import (
     ExecutorCandidate,
     MissionContext,
@@ -1065,10 +1065,31 @@ def list_missions(
             MissionSubtask.deleted == False,
             MissionSubtask.is_done == False,
         ).subquery()
-        q = q.filter(
-            (Mission.executor_id == executor_id) |
-            (Mission.id.in_(subtask_mission_ids))
-        )
+        # `executor_id` here is always a management_user_id (gennis-v2 and
+        # turon-v2 only know their own callers by that id). A mission handed
+        # to a branch director is assigned via gennis_executor_id/
+        # turon_executor_id instead — a raw id in that system's own DB, not
+        # this one — so it never matched here at all: a director's own
+        # "Mening vazifalarim" query silently came back empty no matter what
+        # was assigned to them. Translate through the link tables both ways.
+        gennis_ids = [
+            row.gennis_user_id for row in
+            db.query(GennisUserLink.gennis_user_id).filter(
+                GennisUserLink.management_user_id == executor_id
+            ).all()
+        ]
+        turon_ids = [
+            row.turon_user_id for row in
+            db.query(TuronUserLink.turon_user_id).filter(
+                TuronUserLink.management_user_id == executor_id
+            ).all()
+        ]
+        executor_match = [Mission.executor_id == executor_id, Mission.id.in_(subtask_mission_ids)]
+        if gennis_ids:
+            executor_match.append(Mission.gennis_executor_id.in_(gennis_ids))
+        if turon_ids:
+            executor_match.append(Mission.turon_executor_id.in_(turon_ids))
+        q = q.filter(or_(*executor_match))
     if reviewer_id:
         q = q.filter(Mission.reviewer_id == reviewer_id)
     if branch_id:
