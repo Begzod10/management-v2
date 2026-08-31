@@ -80,6 +80,13 @@ class UserOut(BaseModel):
     salary: Optional[int]
     role: str
     is_active: bool
+    # Separate from crm_username below — this is the one PATCH /users/{id}/username
+    # actually writes to. It was missing here, so a successful username change
+    # (confirmed by its own 200 response) silently vanished on the next profile
+    # load: Pydantic strips any ORM attribute not declared on the response model,
+    # so GET /users/{id} (response_model=UserProfileOut, which extends this) never
+    # returned it at all.
+    username: Optional[str] = None
     crm_username: Optional[str] = None
 
     model_config = {"from_attributes": True}
