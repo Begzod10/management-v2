@@ -600,6 +600,7 @@ class DividendOut(BaseModel):
     date: date
     description: Optional[str]
     payment_type: Optional[str]
+    payment_type_id: Optional[int] = None
     location_id: Optional[int]
     branch_id: Optional[int]
     deleted: bool
@@ -635,6 +636,7 @@ class InvestmentOut(BaseModel):
     date: date
     description: Optional[str]
     payment_type: Optional[str]
+    payment_type_id: Optional[int] = None
     location_id: Optional[int]
     branch_id: Optional[int]
     deleted: bool

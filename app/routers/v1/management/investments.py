@@ -9,6 +9,7 @@ from app.external_models.gennis import GennisInvestment
 from app.external_models.turon import TuronInvestment
 from app.schemas import InvestmentCreate, InvestmentUpdate, InvestmentOut
 from app.dependencies import get_current_user
+from app.utils.payment_types import resolve_payment_type_id
 
 router = APIRouter(prefix="/investments", tags=["Investments"])
 
@@ -85,6 +86,7 @@ def create_investment(
         raise HTTPException(status_code=400, detail="source must be 'gennis' or 'turon'")
 
     obj = Investment(**data.model_dump())
+    obj.payment_type_id = resolve_payment_type_id(db, obj.payment_type)
     db.add(obj)
     db.commit()
     db.refresh(obj)
@@ -122,8 +124,11 @@ def update_investment(
     if not obj:
         raise HTTPException(status_code=404, detail="Investment not found")
 
-    for field, value in data.model_dump(exclude_unset=True).items():
+    updates = data.model_dump(exclude_unset=True)
+    for field, value in updates.items():
         setattr(obj, field, value)
+    if "payment_type" in updates:
+        obj.payment_type_id = resolve_payment_type_id(db, obj.payment_type)
     db.commit()
     db.refresh(obj)
 

@@ -440,6 +440,12 @@ class Dividend(Base):
     date = Column(Date, nullable=False)
     description = Column(Text, nullable=True)
     payment_type = Column(String(255), nullable=True)
+    # FK to this same DB's payment_type table (cash/click/bank) — gennis-v2's
+    # Inkassatsiya channel filters read this, not `payment_type` above. Column
+    # already existed on the shared table; this model just didn't know about
+    # it, so every dividend created here left it NULL. See
+    # gennis-v2/docs/investment-payment-type-duplicates.md.
+    payment_type_id = Column(Integer, nullable=True)
     location_id = Column(Integer, nullable=True)   # Gennis: links to Gennis locations
     branch_id = Column(BigInteger, nullable=True)  # Turon: links to Turon branches
     deleted = Column(Boolean, nullable=False, default=False)
@@ -455,6 +461,8 @@ class Investment(Base):
     date = Column(Date, nullable=False)
     description = Column(Text, nullable=True)
     payment_type = Column(String(255), nullable=True)
+    # Same as Dividend.payment_type_id above — see that comment.
+    payment_type_id = Column(Integer, nullable=True)
     location_id = Column(Integer, nullable=True)   # Gennis: links to Gennis locations
     branch_id = Column(BigInteger, nullable=True)  # Turon: links to Turon branches
     deleted = Column(Boolean, nullable=False, default=False)
