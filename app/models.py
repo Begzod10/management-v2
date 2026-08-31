@@ -2241,6 +2241,24 @@ turon_flow_student_v2_table = Table(
 )
 
 
+class TuronClassTimeTable(Base):
+    """One lesson instance (one row per calendar date, not a weekly
+    template). A group's `teacher_id` above only records the homeroom/
+    primary teacher — a subject teacher who is never set as a group's
+    primary teacher only shows up here. Used to resolve a turon teacher's
+    ACTUAL teaching load for the student_platform login shim below, not just
+    their homeroom groups."""
+    __tablename__ = "turon_class_time_table_v2"
+    __table_args__ = {"extend_existing": True}
+
+    id         = Column(BigInteger, primary_key=True)
+    date       = Column(Date, nullable=True)
+    group_id   = Column(BigInteger, ForeignKey("turon_group_v2.id"), nullable=True)
+    flow_id    = Column(BigInteger, ForeignKey("turon_flow_v2.id"), nullable=True)
+    teacher_id = Column(BigInteger, ForeignKey("user.id"), nullable=True)
+    deleted    = Column(Boolean, default=False)
+
+
 class TuronUserProfileV2(Base):
     """Existence of a row here is what marks a shared `user` as a turon
     person at all (staff included, not just those currently in a group/

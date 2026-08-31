@@ -36,6 +36,8 @@ local accounts on this value, and sending the wrong one creates a duplicate
 account instead of finding the existing one. See gennis-v2's copy of this
 file for the incident that taught us this.
 """
+from datetime import date, timedelta
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy import func, or_
@@ -134,6 +136,41 @@ def _groups_for_student_turon(db: Session, user_id: int) -> list[dict]:
         .filter(
             models.turon_group_student_v2_table.c.student_user_id == user_id,
             models.TuronGroupV2.deleted == False,  # noqa: E712
+        )
+        .order_by(models.TuronGroupV2.name)
+        .all()
+    )
+    return [{"id": r.id, "name": r.name, "price": r.price or 0} for r in rows]
+
+
+def _groups_for_teacher_turon(db: Session, user_id: int) -> list[dict]:
+    """A turon teacher's groups come from two places: `TuronGroupV2.teacher_id`
+    (the homeroom/primary assignment) AND any group they've actually been
+    scheduled to teach per the timetable — a subject teacher (e.g. someone
+    teaching "Web Dasturchilik" to group "1-blue" for one period) is never
+    set as that group's primary teacher, so without the timetable half they
+    sync zero groups into student_platform and can't see their students at
+    all. Bounded to the last 60 days (+ any future lessons) so a teacher who
+    covered one lesson a year ago doesn't keep showing a class they no
+    longer teach.
+    """
+    cutoff = date.today() - timedelta(days=60)
+    timetable_group_ids = db.query(models.TuronClassTimeTable.group_id).filter(
+        models.TuronClassTimeTable.teacher_id == user_id,
+        models.TuronClassTimeTable.group_id.isnot(None),
+        models.TuronClassTimeTable.deleted == False,  # noqa: E712
+        models.TuronClassTimeTable.date >= cutoff,
+    ).distinct()
+
+    rows = (
+        db.query(models.TuronGroupV2.id, models.TuronGroupV2.name, models.TuronGroupV2.price)
+        .filter(
+            or_(
+                models.TuronGroupV2.teacher_id == user_id,
+                models.TuronGroupV2.id.in_(timetable_group_ids),
+            ),
+            models.TuronGroupV2.deleted == False,  # noqa: E712
+            models.TuronGroupV2.status == True,  # noqa: E712
         )
         .order_by(models.TuronGroupV2.name)
         .all()
@@ -264,19 +301,7 @@ def student_platform_login(body: StudentPlatformLoginRequest, db: Session = Depe
             }
     else:  # turon
         if role == "teacher":
-            rows = (
-                db.query(models.TuronGroupV2.id, models.TuronGroupV2.name, models.TuronGroupV2.price)
-                .filter(
-                    models.TuronGroupV2.teacher_id == user.id,
-                    models.TuronGroupV2.deleted == False,  # noqa: E712
-                    models.TuronGroupV2.status == True,  # noqa: E712
-                )
-                .order_by(models.TuronGroupV2.name)
-                .all()
-            )
-            payload["teacher"] = {
-                "group": [{"id": r.id, "name": r.name, "price": r.price or 0} for r in rows]
-            }
+            payload["teacher"] = {"group": _groups_for_teacher_turon(db, user.id)}
         elif role == "student":
             payload["student"] = {
                 "group": _groups_for_student_turon(db, user.id),
