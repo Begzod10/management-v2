@@ -370,6 +370,7 @@ const AccountingPage = () => {
         amount: Number(divForm.amount),
         description: divForm.description,
         payment_type: divForm.payment_type,
+        date: divForm.date,
         source: institution,
         [locationKey]: divForm.branch_id ? Number(divForm.branch_id) : 0,
       };
