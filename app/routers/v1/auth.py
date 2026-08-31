@@ -51,7 +51,11 @@ class GoogleAuthRequest(BaseModel):
 class UserData(BaseModel):
     id: int
     name: str
-    email: str
+    # Optional — migrated gennis/turon accounts can have no email (login
+    # falls back to username for these, see token_data below), but this was
+    # still required here, so logging in with such an account 500'd on
+    # response validation right after issuing valid tokens.
+    email: Optional[str] = None
     timezone: str
     profile_photo_url: Optional[str] = None
     is_verified: bool

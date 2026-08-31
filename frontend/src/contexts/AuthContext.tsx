@@ -3,7 +3,7 @@ import { apiFetch } from "@/lib/api";
 
 interface AuthUser {
   id: number | string;
-  email: string;
+  email: string | null;
   name?: string;
   surname?: string;
   role?: string;
