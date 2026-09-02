@@ -51,7 +51,7 @@ unchanged.
     "phone": [{ "phone": "993154318" }],
     "student": {
       "group": [
-        { "id": 458, "name": "Dchj 12:00", "price": 430000 }
+        { "id": 458, "name": "Dchj 12:00", "price": 430000, "location_id": 3, "location_name": "Chilonzor" }
       ],
       "combined_debt": 430000
     }
@@ -80,8 +80,8 @@ duplicate one.
     "phone": [],
     "teacher": {
       "group": [
-        { "id": 610, "name": "Dchj 10:30", "price": 430000 },
-        { "id": 506, "name": "Dchj 9:00", "price": 430000 }
+        { "id": 610, "name": "Dchj 10:30", "price": 430000, "location_id": 3, "location_name": "Chilonzor" },
+        { "id": 506, "name": "Dchj 9:00", "price": 430000, "location_id": 3, "location_name": "Chilonzor" }
       ]
     }
   }
@@ -114,7 +114,9 @@ For teachers, `user.id` is the gennis **user** id
 ```
 
 For turon, `user.id` **is** the shared `user.id` — there's no separate turon
-id space, unlike gennis.
+id space, unlike gennis. A non-empty `group[]` entry here would carry
+`branch_id`/`branch_name` instead of gennis's `location_id`/`location_name`
+— see the turon student example below.
 
 ### Response — 200 OK, turon student
 
@@ -132,9 +134,11 @@ id space, unlike gennis.
     "phone": [{ "phone": "935455952" }],
     "student": {
       "group": [
-        { "id": 188, "name": "4-green", "price": 2090000 }
+        { "id": 188, "name": "4-green", "price": 2090000, "branch_id": 3, "branch_name": "Chirchiq" }
       ],
-      "flow": [],
+      "flow": [
+        { "id": 12, "name": "Yozgi oqim", "branch_id": 3, "branch_name": "Chirchiq" }
+      ],
       "combined_debt": 0
     }
   }
@@ -142,8 +146,23 @@ id space, unlike gennis.
 ```
 
 Turon students additionally carry `flow[]` — a second, independent grouping
-from `group[]` (not a billing unit, no `price`). `combined_debt` is always
-`0` for turon today; turon-v2 doesn't expose a computed debt figure yet.
+from `group[]` (not a billing unit, no `price`, but same `branch_id`/
+`branch_name` shape). `combined_debt` is always `0` for turon today;
+turon-v2 doesn't expose a computed debt figure yet.
+
+### Location / branch fields
+
+Every entry in `teacher.group[]`, `student.group[]`, and `student.flow[]`
+carries where it physically is — named differently per source because the
+two systems' own schemas differ:
+
+| Source | Fields | Notes |
+|---|---|---|
+| `gennis` | `location_id`, `location_name` | Read straight off `gennis_group` — the mirror table already has the name, no join needed. |
+| `turon` | `branch_id`, `branch_name` | `branch_id` comes off `turon_group_v2` / `turon_flow_v2`; `branch_name` is joined from `turon_branch_v2` (turon doesn't denormalize the name onto the group/flow row itself). |
+
+Either field can be `null` if the source group/flow has no branch/location
+assigned.
 
 ### Error responses
 
