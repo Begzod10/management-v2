@@ -51,9 +51,11 @@ unchanged.
     "phone": [{ "phone": "993154318" }],
     "student": {
       "group": [
-        { "id": 458, "name": "Dchj 12:00", "price": 430000, "location_id": 3, "location_name": "Chilonzor" }
+        { "id": 458, "name": "Dchj 12:00", "price": 430000 }
       ],
-      "combined_debt": 430000
+      "combined_debt": 430000,
+      "location_id": 3,
+      "location_name": "Chilonzor"
     }
   }
 }
@@ -80,9 +82,11 @@ duplicate one.
     "phone": [],
     "teacher": {
       "group": [
-        { "id": 610, "name": "Dchj 10:30", "price": 430000, "location_id": 3, "location_name": "Chilonzor" },
-        { "id": 506, "name": "Dchj 9:00", "price": 430000, "location_id": 3, "location_name": "Chilonzor" }
-      ]
+        { "id": 610, "name": "Dchj 10:30", "price": 430000 },
+        { "id": 506, "name": "Dchj 9:00", "price": 430000 }
+      ],
+      "location_id": 3,
+      "location_name": "Chilonzor"
     }
   }
 }
@@ -107,16 +111,17 @@ For teachers, `user.id` is the gennis **user** id
     "email": null,
     "phone": [{ "phone": "983112203" }],
     "teacher": {
-      "group": []
+      "group": [],
+      "branch_id": 6,
+      "branch_name": "Xo'jakent"
     }
   }
 }
 ```
 
 For turon, `user.id` **is** the shared `user.id` — there's no separate turon
-id space, unlike gennis. A non-empty `group[]` entry here would carry
-`branch_id`/`branch_name` instead of gennis's `location_id`/`location_name`
-— see the turon student example below.
+id space, unlike gennis. `branch_id`/`branch_name` come from the account's
+own `turon_user_profile_v2` row, not from any particular group.
 
 ### Response — 200 OK, turon student
 
@@ -134,35 +139,38 @@ id space, unlike gennis. A non-empty `group[]` entry here would carry
     "phone": [{ "phone": "935455952" }],
     "student": {
       "group": [
-        { "id": 188, "name": "4-green", "price": 2090000, "branch_id": 3, "branch_name": "Chirchiq" }
+        { "id": 197, "name": "0-green", "price": 1650000 }
       ],
       "flow": [
-        { "id": 12, "name": "Yozgi oqim", "branch_id": 3, "branch_name": "Chirchiq" }
+        { "id": 772, "name": "Breakfast" },
+        { "id": 773, "name": "Lunch Primary" },
+        { "id": 775, "name": "Second Lunch" }
       ],
-      "combined_debt": 0
+      "combined_debt": 0,
+      "branch_id": 6,
+      "branch_name": "Xo'jakent"
     }
   }
 }
 ```
 
 Turon students additionally carry `flow[]` — a second, independent grouping
-from `group[]` (not a billing unit, no `price`, but same `branch_id`/
-`branch_name` shape). `combined_debt` is always `0` for turon today;
-turon-v2 doesn't expose a computed debt figure yet.
+from `group[]` (not a billing unit, no `price`). `combined_debt` is always
+`0` for turon today; turon-v2 doesn't expose a computed debt figure yet.
 
 ### Location / branch fields
 
-Every entry in `teacher.group[]`, `student.group[]`, and `student.flow[]`
-carries where it physically is — named differently per source because the
-two systems' own schemas differ:
+`teacher` and `student` each carry **one** location for the whole account —
+not one per `group[]`/`flow[]` entry, since a person has a single home
+branch/location regardless of how many groups they're in. Named differently
+per source because the two systems' own schemas differ:
 
-| Source | Fields | Notes |
+| Source | Fields | Read from |
 |---|---|---|
-| `gennis` | `location_id`, `location_name` | Read straight off `gennis_group` — the mirror table already has the name, no join needed. |
-| `turon` | `branch_id`, `branch_name` | `branch_id` comes off `turon_group_v2` / `turon_flow_v2`; `branch_name` is joined from `turon_branch_v2` (turon doesn't denormalize the name onto the group/flow row itself). |
+| `gennis` | `location_id`, `location_name` | `gennis_user_link` — the account's branch, set at link time. |
+| `turon` | `branch_id`, `branch_name` | `turon_user_profile_v2.branch_id` (the account's own branch), `branch_name` looked up from `turon_branch_v2`. |
 
-Either field can be `null` if the source group/flow has no branch/location
-assigned.
+Either field can be `null` if the account has no branch/location assigned.
 
 ### Error responses
 

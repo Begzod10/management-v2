@@ -36,14 +36,14 @@ local accounts on this value, and sending the wrong one creates a duplicate
 account instead of finding the existing one. See gennis-v2's copy of this
 file for the incident that taught us this.
 
-Each entry in `teacher.group[]` / `student.group[]` / `student.flow[]` also
-carries where that group/flow physically is — gennis and turon name this
-differently because their own schemas do:
-  * gennis: `location_id` + `location_name`, straight off `gennis_group`
-    (no join needed — the mirror table already denormalizes it).
-  * turon: `branch_id` off `turon_group_v2` / `turon_flow_v2`, joined to
-    `turon_branch_v2` for `branch_name` (turon doesn't denormalize the
-    name onto the group/flow row).
+`teacher` and `student` each carry ONE location for the whole account —
+not one per group/flow entry, since a person has a single home
+branch/location regardless of how many groups they're in. gennis and turon
+name this differently because their own schemas do:
+  * gennis: `location_id` + `location_name`, off `gennis_user_link` (the
+    account's branch, set at link time) — not any particular group's.
+  * turon: `branch_id` off `turon_user_profile_v2` (the account's own
+    branch), `branch_name` looked up from `turon_branch_v2`.
 """
 from datetime import date, timedelta
 
@@ -72,13 +72,7 @@ def _groups_for_teacher(db: Session, teacher_gennis_id: int) -> list[dict]:
         models.gennis_teacher_group_link_table.c.teacher_gennis_id == teacher_gennis_id
     )
     rows = (
-        db.query(
-            models.GennisGroup.gennis_id,
-            models.GennisGroup.name,
-            models.GennisGroup.price,
-            models.GennisGroup.location_id,
-            models.GennisGroup.location_name,
-        )
+        db.query(models.GennisGroup.gennis_id, models.GennisGroup.name, models.GennisGroup.price)
         .filter(
             models.GennisGroup.gennis_id.in_(group_ids_sq),
             models.GennisGroup.deleted == False,  # noqa: E712
@@ -87,27 +81,12 @@ def _groups_for_teacher(db: Session, teacher_gennis_id: int) -> list[dict]:
         .order_by(models.GennisGroup.name)
         .all()
     )
-    return [
-        {
-            "id": r.gennis_id,
-            "name": r.name,
-            "price": r.price or 0,
-            "location_id": r.location_id,
-            "location_name": r.location_name,
-        }
-        for r in rows
-    ]
+    return [{"id": r.gennis_id, "name": r.name, "price": r.price or 0} for r in rows]
 
 
 def _groups_for_student(db: Session, student_row_id: int) -> list[dict]:
     rows = (
-        db.query(
-            models.GennisGroup.gennis_id,
-            models.GennisGroup.name,
-            models.GennisGroup.price,
-            models.GennisGroup.location_id,
-            models.GennisGroup.location_name,
-        )
+        db.query(models.GennisGroup.gennis_id, models.GennisGroup.name, models.GennisGroup.price)
         .join(
             models.gennis_student_group_table,
             models.gennis_student_group_table.c.group_id == models.GennisGroup.id,
@@ -119,16 +98,7 @@ def _groups_for_student(db: Session, student_row_id: int) -> list[dict]:
         .order_by(models.GennisGroup.name)
         .all()
     )
-    return [
-        {
-            "id": r.gennis_id,
-            "name": r.name,
-            "price": r.price or 0,
-            "location_id": r.location_id,
-            "location_name": r.location_name,
-        }
-        for r in rows
-    ]
+    return [{"id": r.gennis_id, "name": r.name, "price": r.price or 0} for r in rows]
 
 
 def _combined_debt(db: Session, student_row_id: int) -> int:
@@ -167,18 +137,11 @@ def _combined_debt(db: Session, student_row_id: int) -> int:
 
 def _groups_for_student_turon(db: Session, user_id: int) -> list[dict]:
     rows = (
-        db.query(
-            models.TuronGroupV2.id,
-            models.TuronGroupV2.name,
-            models.TuronGroupV2.price,
-            models.TuronGroupV2.branch_id,
-            models.TuronBranchV2.name.label("branch_name"),
-        )
+        db.query(models.TuronGroupV2.id, models.TuronGroupV2.name, models.TuronGroupV2.price)
         .join(
             models.turon_group_student_v2_table,
             models.turon_group_student_v2_table.c.group_id == models.TuronGroupV2.id,
         )
-        .outerjoin(models.TuronBranchV2, models.TuronBranchV2.id == models.TuronGroupV2.branch_id)
         .filter(
             models.turon_group_student_v2_table.c.student_user_id == user_id,
             models.TuronGroupV2.deleted == False,  # noqa: E712
@@ -186,16 +149,7 @@ def _groups_for_student_turon(db: Session, user_id: int) -> list[dict]:
         .order_by(models.TuronGroupV2.name)
         .all()
     )
-    return [
-        {
-            "id": r.id,
-            "name": r.name,
-            "price": r.price or 0,
-            "branch_id": r.branch_id,
-            "branch_name": r.branch_name,
-        }
-        for r in rows
-    ]
+    return [{"id": r.id, "name": r.name, "price": r.price or 0} for r in rows]
 
 
 def _groups_for_teacher_turon(db: Session, user_id: int) -> list[dict]:
@@ -218,14 +172,7 @@ def _groups_for_teacher_turon(db: Session, user_id: int) -> list[dict]:
     ).distinct()
 
     rows = (
-        db.query(
-            models.TuronGroupV2.id,
-            models.TuronGroupV2.name,
-            models.TuronGroupV2.price,
-            models.TuronGroupV2.branch_id,
-            models.TuronBranchV2.name.label("branch_name"),
-        )
-        .outerjoin(models.TuronBranchV2, models.TuronBranchV2.id == models.TuronGroupV2.branch_id)
+        db.query(models.TuronGroupV2.id, models.TuronGroupV2.name, models.TuronGroupV2.price)
         .filter(
             or_(
                 models.TuronGroupV2.teacher_id == user_id,
@@ -237,16 +184,7 @@ def _groups_for_teacher_turon(db: Session, user_id: int) -> list[dict]:
         .order_by(models.TuronGroupV2.name)
         .all()
     )
-    return [
-        {
-            "id": r.id,
-            "name": r.name,
-            "price": r.price or 0,
-            "branch_id": r.branch_id,
-            "branch_name": r.branch_name,
-        }
-        for r in rows
-    ]
+    return [{"id": r.id, "name": r.name, "price": r.price or 0} for r in rows]
 
 
 def _flows_for_student_turon(db: Session, user_id: int) -> list[dict]:
@@ -254,17 +192,11 @@ def _flows_for_student_turon(db: Session, user_id: int) -> list[dict]:
     Group. No price: unlike a group this isn't a billing unit, so
     student_platform should treat it purely as membership."""
     rows = (
-        db.query(
-            models.TuronFlowV2.id,
-            models.TuronFlowV2.name,
-            models.TuronFlowV2.branch_id,
-            models.TuronBranchV2.name.label("branch_name"),
-        )
+        db.query(models.TuronFlowV2.id, models.TuronFlowV2.name)
         .join(
             models.turon_flow_student_v2_table,
             models.turon_flow_student_v2_table.c.flow_id == models.TuronFlowV2.id,
         )
-        .outerjoin(models.TuronBranchV2, models.TuronBranchV2.id == models.TuronFlowV2.branch_id)
         .filter(
             models.turon_flow_student_v2_table.c.student_user_id == user_id,
             models.TuronFlowV2.deleted == False,  # noqa: E712
@@ -272,15 +204,7 @@ def _flows_for_student_turon(db: Session, user_id: int) -> list[dict]:
         .order_by(models.TuronFlowV2.name)
         .all()
     )
-    return [
-        {
-            "id": r.id,
-            "name": r.name,
-            "branch_id": r.branch_id,
-            "branch_name": r.branch_name,
-        }
-        for r in rows
-    ]
+    return [{"id": r.id, "name": r.name} for r in rows]
 
 
 @router.post("/login")
@@ -357,6 +281,12 @@ def student_platform_login(body: StudentPlatformLoginRequest, db: Session = Depe
     }
 
     if source == "gennis":
+        # One location per account, not one per group — gennis_user_link
+        # already carries it (a person's branch, backfilled at link time),
+        # so there's no need to derive it from whichever group happens to
+        # be first in the list, and no risk of it disagreeing across groups.
+        location_id = gennis_link.location_id
+        location_name = gennis_link.location_name
         if role == "teacher":
             teacher = (
                 db.query(models.GennisTeacherSync.gennis_id)
@@ -364,7 +294,9 @@ def student_platform_login(body: StudentPlatformLoginRequest, db: Session = Depe
                 .first()
             )
             payload["teacher"] = {
-                "group": _groups_for_teacher(db, teacher.gennis_id) if teacher else []
+                "group": _groups_for_teacher(db, teacher.gennis_id) if teacher else [],
+                "location_id": location_id,
+                "location_name": location_name,
             }
         elif role == "student":
             student = (
@@ -383,10 +315,25 @@ def student_platform_login(body: StudentPlatformLoginRequest, db: Session = Depe
             payload["student"] = {
                 "group": _groups_for_student(db, student.id) if student else [],
                 "combined_debt": _combined_debt(db, student.id) if student else 0,
+                "location_id": location_id,
+                "location_name": location_name,
             }
     else:  # turon
+        # Same one-per-account shape as gennis above, sourced from
+        # turon_user_profile_v2.branch_id (the account's own branch) rather
+        # than any particular group/flow's branch.
+        branch_id = turon_profile.branch_id if turon_profile else None
+        branch_name = (
+            db.query(models.TuronBranchV2.name).filter(models.TuronBranchV2.id == branch_id).scalar()
+            if branch_id is not None
+            else None
+        )
         if role == "teacher":
-            payload["teacher"] = {"group": _groups_for_teacher_turon(db, user.id)}
+            payload["teacher"] = {
+                "group": _groups_for_teacher_turon(db, user.id),
+                "branch_id": branch_id,
+                "branch_name": branch_name,
+            }
         elif role == "student":
             payload["student"] = {
                 "group": _groups_for_student_turon(db, user.id),
@@ -395,6 +342,8 @@ def student_platform_login(body: StudentPlatformLoginRequest, db: Session = Depe
                 # to 0 rather than guess at an undocumented JSONB shape,
                 # matching gennis-v2's copy of this endpoint.
                 "combined_debt": 0,
+                "branch_id": branch_id,
+                "branch_name": branch_name,
             }
 
     return {
