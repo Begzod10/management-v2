@@ -152,17 +152,73 @@ def _groups_for_student_turon(db: Session, user_id: int) -> list[dict]:
     return [{"id": r.id, "name": r.name, "price": r.price or 0} for r in rows]
 
 
+# student_platform is the Gennis IT platform — only a teacher of one of
+# these two subjects has any reason to log into it. Unlike a homeroom
+# teacher, they aren't tied to one class: they teach this subject to every
+# active class at their branch. Matched case-insensitively against
+# TuronTeacherProfileV2.subjects' {"name": ...} entries.
+_STUDENT_PLATFORM_SUBJECTS = {"web dasturchilik", "digital literacy"}
+
+
+def _teaches_student_platform_subject(db: Session, user_id: int) -> bool:
+    profile = (
+        db.query(models.TuronTeacherProfileV2.subjects)
+        .filter(
+            models.TuronTeacherProfileV2.user_id == user_id,
+            models.TuronTeacherProfileV2.deleted == False,  # noqa: E712
+        )
+        .first()
+    )
+    if not profile or not profile.subjects:
+        return False
+    return any(
+        (s.get("name") or "").strip().casefold() in _STUDENT_PLATFORM_SUBJECTS
+        for s in profile.subjects
+    )
+
+
 def _groups_for_teacher_turon(db: Session, user_id: int) -> list[dict]:
-    """A turon teacher's groups come from two places: `TuronGroupV2.teacher_id`
-    (the homeroom/primary assignment) AND any group they've actually been
-    scheduled to teach per the timetable — a subject teacher (e.g. someone
-    teaching "Web Dasturchilik" to group "1-blue" for one period) is never
-    set as that group's primary teacher, so without the timetable half they
-    sync zero groups into student_platform and can't see their students at
-    all. Bounded to the last 60 days (+ any future lessons) so a teacher who
-    covered one lesson a year ago doesn't keep showing a class they no
-    longer teach.
+    """A turon teacher's groups, for student_platform's "Мои студенты".
+
+    A Web Dasturchilik / Digital literacy teacher gets every active,
+    non-deleted group at their own branch — they teach that subject to the
+    whole branch, not one assigned class, and resolving them the same way as
+    a homeroom teacher (below) tied their visibility to
+    TuronClassTimeTable rows, which are per-lesson and get deleted/rescheduled
+    constantly; losing the one row that named them as a class's teacher
+    silently dropped that class (and its students) from their sync (seen live
+    2026-09-03, rimefara_teach_turon / group "1-blue").
+
+    Every other subject keeps the narrower per-assignment resolution:
+    `TuronGroupV2.teacher_id` (the homeroom/primary assignment) UNION any
+    group they've actually been scheduled to teach per the timetable in the
+    last 60 days (+ any future lessons) — a subject teacher who isn't a
+    branch-wide student_platform teacher is still never set as a class's
+    primary teacher, so without the timetable half they'd sync zero groups.
+    Branch-wide access isn't extended to them: it would hand them every
+    other teacher's roster, which only makes sense for the two subjects
+    above.
     """
+    if _teaches_student_platform_subject(db, user_id):
+        branch_id = (
+            db.query(models.TuronUserProfileV2.branch_id)
+            .filter(models.TuronUserProfileV2.user_id == user_id)
+            .scalar()
+        )
+        if branch_id is None:
+            return []
+        rows = (
+            db.query(models.TuronGroupV2.id, models.TuronGroupV2.name, models.TuronGroupV2.price)
+            .filter(
+                models.TuronGroupV2.branch_id == branch_id,
+                models.TuronGroupV2.deleted == False,  # noqa: E712
+                models.TuronGroupV2.status == True,  # noqa: E712
+            )
+            .order_by(models.TuronGroupV2.name)
+            .all()
+        )
+        return [{"id": r.id, "name": r.name, "price": r.price or 0} for r in rows]
+
     cutoff = date.today() - timedelta(days=60)
     timetable_group_ids = db.query(models.TuronClassTimeTable.group_id).filter(
         models.TuronClassTimeTable.teacher_id == user_id,
@@ -185,6 +241,33 @@ def _groups_for_teacher_turon(db: Session, user_id: int) -> list[dict]:
         .all()
     )
     return [{"id": r.id, "name": r.name, "price": r.price or 0} for r in rows]
+
+
+def _flows_for_teacher_turon(db: Session, user_id: int) -> list[dict]:
+    """Mirrors _groups_for_teacher_turon for Flow, turon's second independent
+    student container. No `status` column on TuronFlowV2 (unlike Group), so
+    only `deleted` is filtered — matches _flows_for_student_turon below."""
+    cutoff = date.today() - timedelta(days=60)
+    timetable_flow_ids = db.query(models.TuronClassTimeTable.flow_id).filter(
+        models.TuronClassTimeTable.teacher_id == user_id,
+        models.TuronClassTimeTable.flow_id.isnot(None),
+        models.TuronClassTimeTable.deleted == False,  # noqa: E712
+        models.TuronClassTimeTable.date >= cutoff,
+    ).distinct()
+
+    rows = (
+        db.query(models.TuronFlowV2.id, models.TuronFlowV2.name)
+        .filter(
+            or_(
+                models.TuronFlowV2.teacher_id == user_id,
+                models.TuronFlowV2.id.in_(timetable_flow_ids),
+            ),
+            models.TuronFlowV2.deleted == False,  # noqa: E712
+        )
+        .order_by(models.TuronFlowV2.name)
+        .all()
+    )
+    return [{"id": r.id, "name": r.name} for r in rows]
 
 
 def _flows_for_student_turon(db: Session, user_id: int) -> list[dict]:
@@ -331,6 +414,7 @@ def student_platform_login(body: StudentPlatformLoginRequest, db: Session = Depe
         if role == "teacher":
             payload["teacher"] = {
                 "group": _groups_for_teacher_turon(db, user.id),
+                "flow": _flows_for_teacher_turon(db, user.id),
                 "branch_id": branch_id,
                 "branch_name": branch_name,
             }
