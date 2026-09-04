@@ -708,11 +708,31 @@ def create_bulk_missions(
         _sync_to_turon(mission, turon_db)
         created.append(mission)
 
+    # A Gennis/Turon executor is picked as a raw id in that system's own DB,
+    # not a management_user_id — resolve it through the link tables so
+    # `executor_id` (what every other consumer, including turon-v2's own
+    # Missions board, actually filters on) points at the real person instead
+    # of silently falling back to the creator. See GET /missions/'s
+    # executor_id filter above for the read-side half of this same fix —
+    # this is the write-side half that keeps the column from being wrong in
+    # the first place.
+    gennis_ids = [item.id for item in data.gennis_executor_ids]
+    gennis_to_mgmt = {
+        row.gennis_user_id: row.management_user_id
+        for row in db.query(GennisUserLink).filter(GennisUserLink.gennis_user_id.in_(gennis_ids)).all()
+    } if gennis_ids else {}
+
+    turon_ids = [item.id for item in data.turon_executor_ids]
+    turon_to_mgmt = {
+        row.turon_user_id: row.management_user_id
+        for row in db.query(TuronUserLink).filter(TuronUserLink.turon_user_id.in_(turon_ids)).all()
+    } if turon_ids else {}
+
     for item in data.gennis_executor_ids:
         gname = _get_gennis_executor_name(item.id, gennis_db)
         mission = Mission(
             **{**base,
-               "executor_id": creator_id,
+               "executor_id": gennis_to_mgmt.get(item.id, creator_id),
                "creator_id": creator_id,
                "gennis_executor_id": item.id,
                "gennis_executor_name": gname,
@@ -735,7 +755,7 @@ def create_bulk_missions(
         tname = _get_turon_executor_name(item.id, turon_db)
         mission = Mission(
             **{**base,
-               "executor_id": creator_id,
+               "executor_id": turon_to_mgmt.get(item.id, creator_id),
                "creator_id": creator_id,
                "turon_executor_id": item.id,
                "turon_executor_name": tname,
@@ -1171,6 +1191,20 @@ def update_mission(
         mission.turon_reviewer_name = _get_turon_user_name(mission.turon_reviewer_id, turon_db) if mission.turon_reviewer_id else None
     if "location_id" in payload:
         mission.location_name = _get_location_name(mission.location_id, gennis_db) if mission.location_id else None
+
+    # Keep executor_id (what turon-v2/gennis-v2's own boards actually filter
+    # on) in sync when only the Gennis/Turon-specific id changed — same
+    # resolution as create_bulk_missions above, otherwise a re-assignment to
+    # a different branch director leaves executor_id pointing at whoever it
+    # was before (or never set at all).
+    if ("gennis_executor_id" in payload or "location_id" in payload) and "executor_id" not in payload and mission.gennis_executor_id:
+        link = db.query(GennisUserLink).filter(GennisUserLink.gennis_user_id == mission.gennis_executor_id).first()
+        if link:
+            mission.executor_id = link.management_user_id
+    if ("turon_executor_id" in payload or "branch_id" in payload) and "executor_id" not in payload and mission.turon_executor_id:
+        link = db.query(TuronUserLink).filter(TuronUserLink.turon_user_id == mission.turon_executor_id).first()
+        if link:
+            mission.executor_id = link.management_user_id
 
     # Fall back to management reviewer name when no external reviewer name is set
     if "reviewer_id" in payload and mission.reviewer_id:
