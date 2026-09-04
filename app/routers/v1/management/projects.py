@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session, joinedload, aliased
 from typing import List, Optional
 from app.database import get_db
+from app.dependencies import promote_to_manager
 from app.models import Project, ProjectMember, User
 from app.schemas import ProjectCreate, ProjectUpdate, ProjectOut, ProjectMemberAdd, ProjectMemberOut
 
@@ -20,7 +21,7 @@ def create_project(data: ProjectCreate, manager_id: int, db: Session = Depends(g
     manager = db.query(User).filter(User.id == manager_id).first()
     if not manager:
         raise HTTPException(status_code=404, detail="Manager not found")
-    manager.role = "manager"
+    promote_to_manager(manager)
     project = Project(**data.model_dump(), manager_id=manager_id)
     db.add(project)
     db.commit()
@@ -73,7 +74,7 @@ def update_project(project_id: int, data: ProjectUpdate, db: Session = Depends(g
         manager = db.query(User).filter(User.id == new_manager_id, User.deleted == False).first()
         if not manager:
             raise HTTPException(status_code=404, detail="Manager not found")
-        manager.role = "manager"
+        promote_to_manager(manager)
         project.manager_id = new_manager_id
     for field, value in payload.items():
         setattr(project, field, value)

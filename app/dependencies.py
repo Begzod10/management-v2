@@ -55,3 +55,30 @@ def require_roles(*roles: str):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions")
         return user
     return _check
+
+
+# Mirrors frontend/src/lib/permissions.ts::ROLE_RANK — keep the two in sync
+# if either changes. Only used by promote_to_manager below, never for
+# auth/permission checks (those stay on has_role/require_roles above).
+ROLE_RANK = {
+    "owner": 7,
+    "admin": 6,
+    "director": 5,
+    "manager": 4,
+    "hr": 3,
+    "accountant": 2,
+    "spiritualist": 2,
+    "employee": 1,
+    "user": 0,
+    "volunteer": -1,
+}
+
+
+def promote_to_manager(user: models.User) -> None:
+    """Set user.role = "manager" when they're made a project/section
+    manager — unless they already outrank a manager (owner/admin/director),
+    in which case this is a lateral assignment for them, not a promotion,
+    and must not demote their actual role."""
+    if ROLE_RANK.get(user.role, 0) > ROLE_RANK["manager"]:
+        return
+    user.role = "manager"

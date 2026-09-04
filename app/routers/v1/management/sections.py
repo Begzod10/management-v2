@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session, joinedload
 from typing import List, Optional
 from app.database import get_db
+from app.dependencies import promote_to_manager
 from app.models import Section, SectionMember, User
 from app.schemas import SectionCreate, SectionUpdate, SectionOut, SectionMemberAdd, SectionMemberOut, UserOut
 
@@ -21,7 +22,7 @@ def create_section(data: SectionCreate, db: Session = Depends(get_db)):
         leader = db.query(User).filter(User.id == data.leader_id).first()
         if not leader:
             raise HTTPException(status_code=404, detail="Leader not found")
-        leader.role = "manager"
+        promote_to_manager(leader)
     section = Section(**data.model_dump())
     db.add(section)
     db.commit()
