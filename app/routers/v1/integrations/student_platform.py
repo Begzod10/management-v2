@@ -361,6 +361,17 @@ def student_platform_login(body: StudentPlatformLoginRequest, db: Session = Depe
             if (source == "turon" and turon_profile and turon_profile.phone)
             else []
         ),
+        # turon_user_profile_v2.birth_date is already loaded as turon_profile
+        # above — free to include, no extra query. No equivalent exists for
+        # gennis in any table this endpoint reads (see
+        # docs/STUDENT_PLATFORM_INTEGRATION_API.md), so gennis accounts
+        # always get null here; student-platform already treats this field
+        # as advisory/nullable for exactly that reason.
+        "birth_date": (
+            turon_profile.birth_date.isoformat()
+            if (source == "turon" and turon_profile and turon_profile.birth_date)
+            else None
+        ),
     }
 
     if source == "gennis":
@@ -484,6 +495,7 @@ def student_platform_group_students(
                 models.User.name,
                 models.User.surname,
                 models.TuronUserProfileV2.phone,
+                models.TuronUserProfileV2.birth_date,
             )
             .join(
                 models.turon_group_student_v2_table,
@@ -520,6 +532,7 @@ def student_platform_group_students(
                     "surname": r.surname or "",
                     "phone": r.phone or "",
                     "balance": 0,
+                    "birth_date": r.birth_date.isoformat() if r.birth_date else None,
                 }
                 for r in rows
             ]
@@ -559,6 +572,10 @@ def student_platform_group_students(
                 "surname": r.surname or "",
                 "phone": r.phone or "",
                 "balance": 0,
+                # No birth-date-capable column on gennis_student today — see
+                # docs/STUDENT_PLATFORM_INTEGRATION_API.md. Always present so
+                # every roster entry has the same shape regardless of source.
+                "birth_date": None,
             }
             for r in rows
         ]
@@ -595,6 +612,7 @@ def student_platform_flow_students(
             models.User.name,
             models.User.surname,
             models.TuronUserProfileV2.phone,
+            models.TuronUserProfileV2.birth_date,
         )
         .join(
             models.turon_flow_student_v2_table,
@@ -626,6 +644,7 @@ def student_platform_flow_students(
                 "surname": r.surname or "",
                 "phone": r.phone or "",
                 "balance": 0,
+                "birth_date": r.birth_date.isoformat() if r.birth_date else None,
             }
             for r in rows
         ]
