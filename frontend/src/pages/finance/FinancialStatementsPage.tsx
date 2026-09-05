@@ -3,6 +3,7 @@ import { DashboardLayout } from "@/components/DashboardLayout";
 import { MonthPicker } from "@/components/dashboard/MonthPicker";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { apiFetch } from "@/lib/api";
 import { formatCurrency } from "@/lib/format";
 import { Loader2 } from "lucide-react";
@@ -13,6 +14,8 @@ import { Loader2 } from "lucide-react";
 // just reshaped into an explicit Revenue/Expense statement. Keeping one
 // source of truth means this page can never show a different profit/loss
 // figure than the dashboard for the same period.
+
+interface Branch { id: number; name: string }
 
 interface InstitutionStats {
   payments: { total: number };
@@ -68,6 +71,11 @@ interface BalanceSheetData {
   combined: BalanceSheetSection;
 }
 
+interface BranchFilterProps {
+  gennisLocationId: string;
+  turonBranchId: string;
+}
+
 function StatementRow({ label, amount, indent = false, bold = false, negative = false }: {
   label: string; amount: number; indent?: boolean; bold?: boolean; negative?: boolean;
 }) {
@@ -114,7 +122,7 @@ function IncomeStatementCard({ title, stats }: { title: string; stats: Instituti
   );
 }
 
-function IncomeStatementTab() {
+function IncomeStatementTab({ gennisLocationId, turonBranchId }: BranchFilterProps) {
   const now = new Date();
   const [from, setFrom] = useState(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`);
   const [to, setTo] = useState(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate()}`);
@@ -126,12 +134,14 @@ function IncomeStatementTab() {
     const p = new URLSearchParams();
     if (from) p.set("from_date", from);
     if (to) p.set("to_date", to);
+    if (gennisLocationId !== "all") p.set("gennis_location_id", gennisLocationId);
+    if (turonBranchId !== "all") p.set("turon_branch_id", turonBranchId);
     apiFetch(`/statistics/overview?${p}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((res: OverviewData | null) => { if (res) setData(res); })
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, [from, to]);
+  }, [from, to, gennisLocationId, turonBranchId]);
 
   return (
     <div className="space-y-4">
@@ -206,18 +216,21 @@ function BalanceSheetSectionCard({ title, section }: { title: string; section: B
   );
 }
 
-function BalanceSheetTab() {
+function BalanceSheetTab({ gennisLocationId, turonBranchId }: BranchFilterProps) {
   const [data, setData] = useState<BalanceSheetData | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     setLoading(true);
-    apiFetch("/reports/balance-sheet")
+    const p = new URLSearchParams();
+    if (gennisLocationId !== "all") p.set("gennis_location_id", gennisLocationId);
+    if (turonBranchId !== "all") p.set("turon_branch_id", turonBranchId);
+    apiFetch(`/reports/balance-sheet?${p}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((res: BalanceSheetData | null) => { if (res) setData(res); })
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, []);
+  }, [gennisLocationId, turonBranchId]);
 
   return (
     <div className="space-y-4">
@@ -240,15 +253,62 @@ function BalanceSheetTab() {
 }
 
 export default function FinancialStatementsPage() {
+  const [gennisBranches, setGennisBranches] = useState<Branch[]>([]);
+  const [turonBranches, setTuronBranches] = useState<Branch[]>([]);
+  const [gennisLocationId, setGennisLocationId] = useState("all");
+  const [turonBranchId, setTuronBranchId] = useState("all");
+
+  useEffect(() => {
+    apiFetch("/gennis/branches")
+      .then((r) => (r.ok ? r.json() : []))
+      .then((d: Branch[]) => setGennisBranches(Array.isArray(d) ? d : []))
+      .catch(() => {});
+    apiFetch("/turon/branches")
+      .then((r) => (r.ok ? r.json() : []))
+      .then((d: Branch[]) => setTuronBranches(Array.isArray(d) ? d : []))
+      .catch(() => {});
+  }, []);
+
+  const branchFilters = (
+    <div className="flex flex-wrap items-center gap-2">
+      <Select value={gennisLocationId} onValueChange={setGennisLocationId}>
+        <SelectTrigger className="w-44 h-8 text-xs">
+          <SelectValue placeholder="Gennis filial" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="all">Gennis — barcha filiallar</SelectItem>
+          {gennisBranches.map((b) => (
+            <SelectItem key={b.id} value={String(b.id)}>{b.name}</SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <Select value={turonBranchId} onValueChange={setTuronBranchId}>
+        <SelectTrigger className="w-44 h-8 text-xs">
+          <SelectValue placeholder="Turon filial" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="all">Turon — barcha filiallar</SelectItem>
+          {turonBranches.map((b) => (
+            <SelectItem key={b.id} value={String(b.id)}>{b.name}</SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </div>
+  );
+
   return (
-    <DashboardLayout title="Moliyaviy hisobotlar">
+    <DashboardLayout title="Moliyaviy hisobotlar" headerExtra={branchFilters}>
       <Tabs defaultValue="income">
         <TabsList>
           <TabsTrigger value="income">Foyda va Zarar</TabsTrigger>
           <TabsTrigger value="balance">Balans</TabsTrigger>
         </TabsList>
-        <TabsContent value="income" className="mt-4"><IncomeStatementTab /></TabsContent>
-        <TabsContent value="balance" className="mt-4"><BalanceSheetTab /></TabsContent>
+        <TabsContent value="income" className="mt-4">
+          <IncomeStatementTab gennisLocationId={gennisLocationId} turonBranchId={turonBranchId} />
+        </TabsContent>
+        <TabsContent value="balance" className="mt-4">
+          <BalanceSheetTab gennisLocationId={gennisLocationId} turonBranchId={turonBranchId} />
+        </TabsContent>
       </Tabs>
     </DashboardLayout>
   );

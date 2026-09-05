@@ -31,8 +31,9 @@ aggregated assets/liabilities/net-worth. Scope, deliberately kept simple
   GAAP-audited statement.
 """
 from datetime import datetime, timezone
+from typing import Optional
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -53,7 +54,7 @@ from .statistics import gennis_summary, turon_summary
 router = APIRouter(prefix="/reports", tags=["Reports"])
 
 
-def _cash_position(db: Session, summary_fn) -> int:
+def _cash_position(db: Session, summary_fn, location_or_branch_id: Optional[int]) -> int:
     """All-time (no month/year bound) net cash flow via the same _summary
     machinery /statistics/overview already trusts for the Income Statement —
     unbounded by period, this is exactly "every rupee in minus every rupee
@@ -67,45 +68,53 @@ def _cash_position(db: Session, summary_fn) -> int:
     directly like this, an omitted from_date/to_date stays a truthy
     Query object and breaks the `to_date + timedelta(...)` arithmetic
     inside _month_year_filter_gennis_local/_month_year_filter_turon."""
-    s = summary_fn(None, None, None, db, from_date=None, to_date=None)
+    s = summary_fn(None, None, location_or_branch_id, db, from_date=None, to_date=None)
     return s["remaining"]
 
 
-def _loans_by_direction(db: Session, source: str, direction: str) -> int:
-    return (
-        db.query(func.coalesce(func.sum(BranchLoan.principal_amount), 0))
-        .filter(
-            BranchLoan.source == source,
-            BranchLoan.direction == direction,
-            BranchLoan.status == "active",
-            BranchLoan.deleted == False,  # noqa: E712
-        )
-        .scalar()
-        or 0
+def _loans_by_direction(
+    db: Session, source: str, direction: str, location_id: Optional[int], branch_id: Optional[int],
+) -> int:
+    q = db.query(func.coalesce(func.sum(BranchLoan.principal_amount), 0)).filter(
+        BranchLoan.source == source,
+        BranchLoan.direction == direction,
+        BranchLoan.status == "active",
+        BranchLoan.deleted == False,  # noqa: E712
     )
+    if location_id is not None:
+        q = q.filter(BranchLoan.location_id == location_id)
+    if branch_id is not None:
+        q = q.filter(BranchLoan.branch_id == branch_id)
+    return q.scalar() or 0
 
 
-def _gennis_section(db: Session) -> BalanceSheetSection:
-    cash = _cash_position(db, gennis_summary)
+def _gennis_section(db: Session, location_id: Optional[int]) -> BalanceSheetSection:
+    cash = _cash_position(db, gennis_summary, location_id)
     # func.greatest(col, 0) floors every row at zero before summing — a
     # negative remaining_debt/remaining_salary means a credit/overpayment in
     # the OTHER party's favor, which isn't this line's asset/liability to
     # report (there's no "credits owed by us" line in either system today
     # to move it to instead, so it's excluded rather than misclassified).
-    receivables = db.query(
+    receivables_q = db.query(
         func.coalesce(func.sum(func.greatest(GennisAttendanceHistoryStudentLive.remaining_debt, 0)), 0)
-    ).scalar() or 0
-    loans_receivable = _loans_by_direction(db, "gennis", "out")
-
-    unpaid_salaries = (
-        (db.query(func.coalesce(func.sum(func.greatest(GennisTeacherSalaryLive.remaining_salary, 0)), 0))
-         .filter(GennisTeacherSalaryLive.is_deleted == False).scalar() or 0)  # noqa: E712
-        + (db.query(func.coalesce(func.sum(func.greatest(GennisAssistentSalaryLive.remaining_salary, 0)), 0))
-           .filter(GennisAssistentSalaryLive.is_deleted == False).scalar() or 0)  # noqa: E712
-        + (db.query(func.coalesce(func.sum(func.greatest(GennisStaffSalaryLive.remaining_salary, 0)), 0))
-           .filter(GennisStaffSalaryLive.is_deleted == False).scalar() or 0)  # noqa: E712
     )
-    loans_payable = _loans_by_direction(db, "gennis", "in")
+    if location_id is not None:
+        receivables_q = receivables_q.filter(GennisAttendanceHistoryStudentLive.location_id == location_id)
+    receivables = receivables_q.scalar() or 0
+    loans_receivable = _loans_by_direction(db, "gennis", "out", location_id, None)
+
+    teacher_q = db.query(func.coalesce(func.sum(func.greatest(GennisTeacherSalaryLive.remaining_salary, 0)), 0)).filter(
+        GennisTeacherSalaryLive.is_deleted == False)  # noqa: E712
+    assistent_q = db.query(func.coalesce(func.sum(func.greatest(GennisAssistentSalaryLive.remaining_salary, 0)), 0)).filter(
+        GennisAssistentSalaryLive.is_deleted == False)  # noqa: E712
+    staff_q = db.query(func.coalesce(func.sum(func.greatest(GennisStaffSalaryLive.remaining_salary, 0)), 0)).filter(
+        GennisStaffSalaryLive.is_deleted == False)  # noqa: E712
+    if location_id is not None:
+        teacher_q = teacher_q.filter(GennisTeacherSalaryLive.location_id == location_id)
+        assistent_q = assistent_q.filter(GennisAssistentSalaryLive.location_id == location_id)
+        staff_q = staff_q.filter(GennisStaffSalaryLive.location_id == location_id)
+    unpaid_salaries = (teacher_q.scalar() or 0) + (assistent_q.scalar() or 0) + (staff_q.scalar() or 0)
+    loans_payable = _loans_by_direction(db, "gennis", "in", location_id, None)
 
     assets_total = cash + receivables + loans_receivable
     liabilities_total = unpaid_salaries + loans_payable
@@ -120,20 +129,25 @@ def _gennis_section(db: Session) -> BalanceSheetSection:
     )
 
 
-def _turon_section(db: Session) -> BalanceSheetSection:
-    cash = _cash_position(db, turon_summary)
-    receivables = db.query(
+def _turon_section(db: Session, branch_id: Optional[int]) -> BalanceSheetSection:
+    cash = _cash_position(db, turon_summary, branch_id)
+    receivables_q = db.query(
         func.coalesce(func.sum(func.greatest(TuronAttendancePerMonthV2.remaining_debt, 0)), 0)
-    ).filter(TuronAttendancePerMonthV2.deleted == False).scalar() or 0  # noqa: E712
-    loans_receivable = _loans_by_direction(db, "turon", "out")
+    ).filter(TuronAttendancePerMonthV2.deleted == False)  # noqa: E712
+    if branch_id is not None:
+        receivables_q = receivables_q.filter(TuronAttendancePerMonthV2.branch_id == branch_id)
+    receivables = receivables_q.scalar() or 0
+    loans_receivable = _loans_by_direction(db, "turon", "out", None, branch_id)
 
-    unpaid_salaries = (
-        (db.query(func.coalesce(func.sum(func.greatest(TuronTeacherSalaryV2.remaining_salary, 0)), 0))
-         .filter(TuronTeacherSalaryV2.deleted == False).scalar() or 0)  # noqa: E712
-        + (db.query(func.coalesce(func.sum(func.greatest(TuronStaffSalaryV2.remaining_salary, 0)), 0))
-           .filter(TuronStaffSalaryV2.deleted == False).scalar() or 0)  # noqa: E712
-    )
-    loans_payable = _loans_by_direction(db, "turon", "in")
+    teacher_q = db.query(func.coalesce(func.sum(func.greatest(TuronTeacherSalaryV2.remaining_salary, 0)), 0)).filter(
+        TuronTeacherSalaryV2.deleted == False)  # noqa: E712
+    staff_q = db.query(func.coalesce(func.sum(func.greatest(TuronStaffSalaryV2.remaining_salary, 0)), 0)).filter(
+        TuronStaffSalaryV2.deleted == False)  # noqa: E712
+    if branch_id is not None:
+        teacher_q = teacher_q.filter(TuronTeacherSalaryV2.branch_id == branch_id)
+        staff_q = staff_q.filter(TuronStaffSalaryV2.branch_id == branch_id)
+    unpaid_salaries = (teacher_q.scalar() or 0) + (staff_q.scalar() or 0)
+    loans_payable = _loans_by_direction(db, "turon", "in", None, branch_id)
 
     assets_total = cash + receivables + loans_receivable
     liabilities_total = unpaid_salaries + loans_payable
@@ -168,11 +182,17 @@ def _combine(g: BalanceSheetSection, t: BalanceSheetSection) -> BalanceSheetSect
 
 
 @router.get("/balance-sheet", response_model=BalanceSheetOut)
-def balance_sheet(db: Session = Depends(get_db)):
-    """Live net-worth snapshot combining Gennis + Turon. See module
+def balance_sheet(
+    gennis_location_id: Optional[int] = Query(None),
+    turon_branch_id: Optional[int] = Query(None),
+    db: Session = Depends(get_db),
+):
+    """Live net-worth snapshot combining Gennis + Turon, optionally scoped
+    to one Gennis location and/or one Turon branch — same two filters
+    /statistics/overview already takes for the Income Statement. See module
     docstring for exactly what each line means and its limitations."""
-    g = _gennis_section(db)
-    t = _turon_section(db)
+    g = _gennis_section(db, gennis_location_id)
+    t = _turon_section(db, turon_branch_id)
     return BalanceSheetOut(
         as_of=datetime.now(timezone.utc).isoformat(),
         gennis=g,
