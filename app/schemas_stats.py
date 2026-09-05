@@ -438,3 +438,35 @@ class TuronEncashmentOut(BaseModel):
     summary: TuronEncashmentSummary
     overall_total: int
     dates: List[YearMonths]
+
+
+# ── Balance Sheet ────────────────────────────────────────────────────────────
+# A management/internal net-worth snapshot, not a certified accrual balance
+# sheet — see app/routers/v1/management/reports.py's module docstring for
+# what each line means and why Equity is a derived plug rather than an
+# independently-tracked owner-equity ledger.
+
+class BalanceSheetAssets(BaseModel):
+    cash: int              # cumulative net cash position since inception
+    receivables: int       # student debt currently outstanding (all unpaid months)
+    loans_receivable: int  # active branch loans we lent out, not yet settled
+    total: int
+
+
+class BalanceSheetLiabilities(BaseModel):
+    unpaid_salaries: int   # accrued but unpaid teacher/assistant/staff salary
+    loans_payable: int     # active branch loans we borrowed, not yet settled
+    total: int
+
+
+class BalanceSheetSection(BaseModel):
+    assets: BalanceSheetAssets
+    liabilities: BalanceSheetLiabilities
+    net_worth: int          # assets.total - liabilities.total
+
+
+class BalanceSheetOut(BaseModel):
+    as_of: str               # ISO timestamp — this is always "right now", no historical date picker
+    gennis: BalanceSheetSection
+    turon: BalanceSheetSection
+    combined: BalanceSheetSection

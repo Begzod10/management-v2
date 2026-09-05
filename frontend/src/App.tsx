@@ -23,6 +23,7 @@ import DebtorsPage from "./pages/finance/DebtorsPage";
 import SalariesPage from "./pages/finance/SalariesPage";
 import OverheadsPage from "./pages/finance/OverheadsPage";
 import OverheadTypesPage from "./pages/finance/OverheadTypesPage";
+import FinancialStatementsPage from "./pages/finance/FinancialStatementsPage";
 import BranchLoansPage from "./pages/finance/BranchLoansPage";
 import BranchLoanDetailPage from "./pages/finance/BranchLoanDetailPage";
 import SchoolErpDashboardPage from "./pages/buxgalteriya/school-erp/DashboardPage";
@@ -99,6 +100,7 @@ const App = () => (
                 <Route path="/finance/debtors" element={<ProtectedLayout><PageGuard page="accounting"><DebtorsPage /></PageGuard></ProtectedLayout>} />
                 <Route path="/finance/salaries" element={<ProtectedLayout><PageGuard page="accounting"><SalariesPage /></PageGuard></ProtectedLayout>} />
                 <Route path="/finance/overheads" element={<ProtectedLayout><PageGuard page="accounting"><OverheadsPage /></PageGuard></ProtectedLayout>} />
+                <Route path="/finance/statements" element={<ProtectedLayout><PageGuard page="accounting"><FinancialStatementsPage /></PageGuard></ProtectedLayout>} />
                 <Route path="/buxgalteriya/branch-loans" element={<ProtectedLayout><PageGuard page="accounting"><BranchLoansPage /></PageGuard></ProtectedLayout>} />
                 <Route path="/finance/transactions/:id" element={<ProtectedLayout><PageGuard page="accounting"><BranchLoanDetailPage /></PageGuard></ProtectedLayout>} />
                 <Route path="/buxgalteriya/overhead-types" element={<ProtectedLayout><PageGuard page="accounting"><OverheadTypesPage /></PageGuard></ProtectedLayout>} />
