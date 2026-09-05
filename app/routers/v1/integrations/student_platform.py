@@ -489,11 +489,26 @@ def student_platform_group_students(
                 models.turon_group_student_v2_table,
                 models.turon_group_student_v2_table.c.student_user_id == models.User.id,
             )
+            # INNER join, not outer — a student can stay linked in
+            # turon_group_student_v2 (stale membership, or v1 itself never
+            # cleaned up its own M2M row) after being marked deleted
+            # ("chiqarilgan"); without this they kept showing up in
+            # student_platform's group roster (rimefara_teach_turon /
+            # "10-green", Xojakent branch, 2026-09-05: 6 deleted students
+            # still listed alongside the 5 real ones). Matches turon-v2's
+            # own _group_students in apps/backend/app/api/v1/groups.py.
+            .join(
+                models.TuronStudentProfileV2,
+                models.TuronStudentProfileV2.user_id == models.User.id,
+            )
             .outerjoin(
                 models.TuronUserProfileV2,
                 models.TuronUserProfileV2.user_id == models.User.id,
             )
-            .filter(models.turon_group_student_v2_table.c.group_id == group.id)
+            .filter(
+                models.turon_group_student_v2_table.c.group_id == group.id,
+                models.TuronStudentProfileV2.deleted == False,  # noqa: E712
+            )
             .order_by(models.User.surname, models.User.name)
             .all()
         )
@@ -585,11 +600,21 @@ def student_platform_flow_students(
             models.turon_flow_student_v2_table,
             models.turon_flow_student_v2_table.c.student_user_id == models.User.id,
         )
+        # Same stale-membership guard as /group/{id}/students above — a
+        # deleted student's turon_flow_student_v2 row isn't always cleaned
+        # up either.
+        .join(
+            models.TuronStudentProfileV2,
+            models.TuronStudentProfileV2.user_id == models.User.id,
+        )
         .outerjoin(
             models.TuronUserProfileV2,
             models.TuronUserProfileV2.user_id == models.User.id,
         )
-        .filter(models.turon_flow_student_v2_table.c.flow_id == flow.id)
+        .filter(
+            models.turon_flow_student_v2_table.c.flow_id == flow.id,
+            models.TuronStudentProfileV2.deleted == False,  # noqa: E712
+        )
         .order_by(models.User.surname, models.User.name)
         .all()
     )

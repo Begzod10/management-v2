@@ -2275,6 +2275,20 @@ class TuronUserProfileV2(Base):
     branch_id   = Column(Integer, nullable=True)
 
 
+class TuronStudentProfileV2(Base):
+    """Mirrors turon-v2's TuronStudentProfile (app/models/registration.py) —
+    specifically `deleted`, needed to exclude a student who was removed from
+    a class ("chiqarilgan") but whose turon_group_student_v2 / turon_
+    flow_student_v2 link row was never cleaned up (same stale-membership gap
+    turon-v2's own groups.py::_group_students already filters around)."""
+    __tablename__ = "turon_student_profile_v2"
+    __table_args__ = {"extend_existing": True}
+
+    id      = Column(BigInteger, primary_key=True)
+    user_id = Column(BigInteger, ForeignKey("user.id"), nullable=False, unique=True)
+    deleted = Column(Boolean, default=False)
+
+
 class PaymentType(Base):
     """Shared payment-type reference (cash/click/bank) — owned by turon-v2's
     own migration (see its scripts/inspect_payment_types.py), not this
