@@ -49,6 +49,7 @@ unchanged.
     "role": "student",
     "email": null,
     "phone": [{ "phone": "993154318" }],
+    "birth_date": null,
     "student": {
       "group": [
         { "id": 458, "name": "Dchj 12:00", "price": 430000 }
@@ -80,6 +81,7 @@ duplicate one.
     "role": "teacher",
     "email": null,
     "phone": [],
+    "birth_date": null,
     "teacher": {
       "group": [
         { "id": 610, "name": "Dchj 10:30", "price": 430000 },
@@ -110,6 +112,7 @@ For teachers, `user.id` is the gennis **user** id
     "role": "teacher",
     "email": null,
     "phone": [{ "phone": "983112203" }],
+    "birth_date": "1994-03-12",
     "teacher": {
       "group": [],
       "branch_id": 6,
@@ -137,6 +140,7 @@ own `turon_user_profile_v2` row, not from any particular group.
     "role": "student",
     "email": null,
     "phone": [{ "phone": "935455952" }],
+    "birth_date": "2015-07-04",
     "student": {
       "group": [
         { "id": 197, "name": "0-green", "price": 1650000 }
@@ -157,6 +161,26 @@ own `turon_user_profile_v2` row, not from any particular group.
 Turon students additionally carry `flow[]` — a second, independent grouping
 from `group[]` (not a billing unit, no `price`). `combined_debt` is always
 `0` for turon today; turon-v2 doesn't expose a computed debt figure yet.
+
+### `birth_date`
+
+Top-level on `user` (both teacher and student, both sources) — an ISO
+`"YYYY-MM-DD"` string, or `null`.
+
+- **turon**: read from `turon_user_profile_v2.birth_date` — already loaded
+  as `turon_profile` earlier in the handler, so this is free (no extra
+  query). Populated for most, not all, real accounts.
+- **gennis**: always `null`. No table this endpoint reads (`gennis_student`,
+  `gennis_user_link`, `gennis_teacher_sync`) carries a birth date — the
+  live legacy gennis DB's `users.born_day/born_month/born_year` does have
+  it, but reaching that would mean a second, genuinely-remote DB
+  round-trip on every gennis login (`get_gennis_db()`, not currently
+  opened anywhere in this file). Deferred; revisit if a gennis-side age
+  feature is actually needed.
+
+student_platform stores this as an advisory, nullable field — never gate
+access on it being present, only on it being absent-vs-a-real-value when
+it is present.
 
 ### Location / branch fields
 
@@ -226,14 +250,16 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
       "name": "Temur",
       "surname": "Abdurashidov",
       "phone": "949061323",
-      "balance": 0
+      "balance": 0,
+      "birth_date": null
     },
     {
       "id": 12480,
       "name": "Sunnat",
       "surname": "Abdusamatov",
       "phone": "500052636",
-      "balance": 0
+      "balance": 0,
+      "birth_date": null
     }
   ]
 }
@@ -249,7 +275,8 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
       "name": "Sarvar",
       "surname": "Ruzmatov",
       "phone": "935455952",
-      "balance": 0
+      "balance": 0,
+      "birth_date": "2015-07-04"
     }
   ]
 }
@@ -257,6 +284,9 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 
 `balance` is always `0` in both cases — old gennis's response shape included
 the field, but neither source computes a real per-student balance here.
+`birth_date` follows the same rule as `/login` (see above): populated for
+most turon accounts from `turon_user_profile_v2.birth_date`, always `null`
+for gennis.
 
 If the group id doesn't exist (or belongs to the *other* source — a gennis
 id passed with `source=turon` or vice versa, since the two are independent,
@@ -289,7 +319,8 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
       "name": "Sarvar",
       "surname": "Ruzmatov",
       "phone": "935455952",
-      "balance": 0
+      "balance": 0,
+      "birth_date": "2015-07-04"
     }
   ]
 }
