@@ -1,7 +1,7 @@
 import { useNavigate } from "react-router-dom";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { Card, CardContent } from "@/components/ui/card";
-import { Users, Wallet, ReceiptText } from "lucide-react";
+import { Users, Wallet, ReceiptText, FileBarChart } from "lucide-react";
 
 const sections = [
   {
@@ -21,6 +21,12 @@ const sections = [
     desc: "Qo'shimcha xarajatlarni boshqarish",
     href: "/finance/overheads",
     icon: ReceiptText,
+  },
+  {
+    title: "Moliyaviy hisobotlar",
+    desc: "Foyda va zarar, balans — Gennis va Turon bo'yicha",
+    href: "/finance/statements",
+    icon: FileBarChart,
   },
 ];
 
