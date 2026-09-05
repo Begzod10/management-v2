@@ -54,6 +54,7 @@ import {
   FileText,
   Calculator,
   Building2,
+  FileBarChart,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -74,6 +75,7 @@ const regularSections = [
       { title: "Loyihalar", url: "/projects", icon: FolderKanban, page: "projects" },
       { title: "Bo'limlar", url: "/sections", icon: LayoutList, page: "sections" },
       { title: "Moliya Boshqarma", url: "/finance", icon: BarChart3, page: "accounting" },
+      { title: "Moliyaviy hisobotlar", url: "/finance/statements", icon: FileBarChart, page: "accounting" },
       { title: "Statistika", url: "/statistics", icon: TrendingUp, page: "statistics" },
       { title: "Talablar Tizimi", url: "/applications", icon: Inbox, page: "applications" },
     ],
