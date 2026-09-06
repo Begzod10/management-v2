@@ -1025,3 +1025,44 @@ class GennisUserLinkOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class ParentRegistrationOut(BaseModel):
+    id: int
+    name: str
+    surname: str
+    phone: str
+    address: Optional[str]
+    comment: Optional[str]
+    username: str
+    student_id: Optional[int]
+    status: str
+    reviewed_by: Optional[int]
+    reviewed_at: Optional[datetime]
+    linked_user_id: Optional[int]
+    created_at: Optional[datetime]
+    model_config = {"from_attributes": True}
+
+
+class ParentRegistrationChild(BaseModel):
+    source: str  # "gennis" | "turon"
+    child_ref_id: int
+
+
+class ParentRegistrationApprove(BaseModel):
+    children: List[ParentRegistrationChild] = []
+
+
+class ParentChildLinkCreate(BaseModel):
+    parent_user_id: int
+    source: str
+    child_ref_id: int
+
+
+class ParentChildLinkOut(BaseModel):
+    id: int
+    parent_user_id: int
+    source: str
+    child_ref_id: int
+    created_at: Optional[datetime]
+    model_config = {"from_attributes": True}
+
+

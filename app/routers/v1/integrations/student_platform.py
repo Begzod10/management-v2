@@ -52,7 +52,7 @@ from pydantic import BaseModel
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
-from app import models
+from app import gennis_v2_models, models
 from app.core.security import create_access_token
 from app.database import get_db
 from app.dependencies import get_current_user
@@ -133,6 +133,53 @@ def _combined_debt(db: Session, student_row_id: int) -> int:
     )
 
     return max(0, int(price) - int(charity))
+
+
+def _parent_children(db: Session, parent_user_id: int) -> list[dict]:
+    """A parent's children, in the shape student_platform asked for
+    (docs/requests to management-v2, #12): each child's own `id` and
+    `source`, resolved from ParentChildLink's raw (source, child_ref_id)
+    pairs to a display name. Two lookups because a gennis child's id space
+    (gennis_student.gennis_id) and a turon child's (plain `user.id`) are
+    unrelated tables — see ParentChildLink's docstring."""
+    links = db.query(gennis_v2_models.ParentChildLink).filter(
+        gennis_v2_models.ParentChildLink.parent_user_id == parent_user_id
+    ).all()
+    if not links:
+        return []
+
+    gennis_ids = [l.child_ref_id for l in links if l.source == "gennis"]
+    turon_ids = [l.child_ref_id for l in links if l.source == "turon"]
+
+    gennis_names = {}
+    if gennis_ids:
+        gennis_names = {
+            row.gennis_id: (row.name, row.surname)
+            for row in db.query(models.GennisStudent.gennis_id, models.GennisStudent.name, models.GennisStudent.surname)
+            .filter(models.GennisStudent.gennis_id.in_(gennis_ids))
+            .all()
+        }
+
+    turon_names = {}
+    if turon_ids:
+        turon_names = {
+            row.id: (row.name, row.surname)
+            for row in db.query(models.User.id, models.User.name, models.User.surname)
+            .filter(models.User.id.in_(turon_ids))
+            .all()
+        }
+
+    children = []
+    for link in links:
+        names = gennis_names if link.source == "gennis" else turon_names
+        name, surname = names.get(link.child_ref_id, ("", ""))
+        children.append({
+            "id": link.child_ref_id,
+            "source": link.source,
+            "name": name,
+            "surname": surname,
+        })
+    return children
 
 
 def _groups_for_student_turon(db: Session, user_id: int) -> list[dict]:
@@ -319,6 +366,51 @@ def student_platform_login(body: StudentPlatformLoginRequest, db: Session = Depe
     )
 
     roles = {user.role} | {r.role for r in user.extra_roles}
+
+    # A parent is never themself a gennis/turon person — they have no
+    # gennis_user_link or turon_user_profile_v2 of their own, so the
+    # gennis/turon resolution below (built for teacher/student accounts)
+    # doesn't apply and must never run for them. Branch out first, before
+    # any of that, rather than adding "unless role == parent" checks
+    # scattered through it. This must come before the 409 below: that
+    # check exists to catch a teacher/student account with no sync record,
+    # which says nothing about whether a parent can log in.
+    #
+    # Gated on `user.role` (the base column approve_registration sets, and
+    # the only thing that means "this account IS a parent") rather than the
+    # derived `role` below: that derived value gives "teacher"/"student"
+    # priority over the base role whenever extra_roles carries one, so
+    # gating on it here would let a parent account that ever picked up an
+    # extra teacher/student role silently skip this branch and fall into
+    # gennis/turon resolution as if it were that role — the opposite of
+    # what this check exists to guarantee.
+    if user.role == "parent":
+        return {
+            "access_token": create_access_token({
+                "sub": user.username or user.email,
+                "user_id": user.id,
+                "system": "management",
+                "role": "parent",
+                "roles": list(roles),
+            }),
+            "type_user": "parent",
+            # Not "gennis" or "turon": this account isn't sourced from
+            # either — it's a plain management account. Each entry in
+            # parent.children carries its OWN source instead, since a
+            # parent's children can be split across both systems.
+            "source": "management",
+            "user": {
+                "id": user.id,
+                "name": user.name or "",
+                "surname": user.surname or "",
+                "role": "parent",
+                "email": user.email,
+                "phone": [],
+                "birth_date": None,
+                "parent": {"children": _parent_children(db, user.id)},
+            },
+        }
+
     role = "teacher" if "teacher" in roles else ("student" if "student" in roles else user.role)
 
     # student_platform keys everything on the (source, id) pair, so an

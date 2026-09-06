@@ -34,6 +34,7 @@ from .routers.v1.management import (
     admin_requests, branch_transactions, overhead_type_logs,
     gennis_subjects, gennis_groups, gennis_students, gennis_leads, gennis_user_links,
     reports, voice_missions, voice_realtime, gemini_voice_realtime,
+    parent_registrations,
 )
 from .routers.v1.gennis import detail as gennis_detail
 from .routers.v1.turon import (
@@ -42,6 +43,7 @@ from .routers.v1.turon import (
     terms as turon_terms, timetable as turon_timetable,
 )
 from .routers.v1.integrations import student_platform as integrations_student_platform
+from .routers.v1.integrations import student_family as integrations_student_family
 from .mobile import (
     auth as mobile_auth,
     events as mobile_events,
@@ -207,6 +209,8 @@ app.include_router(gennis_groups.router, prefix=V1)
 app.include_router(gennis_students.router, prefix=V1)
 app.include_router(gennis_leads.router, prefix=V1)
 app.include_router(gennis_user_links.router, prefix=V1)
+app.include_router(parent_registrations.router, prefix=V1)
+app.include_router(parent_registrations.links_router, prefix=V1)
 app.include_router(projects.router, prefix=V1)
 app.include_router(sections.router, prefix=V1)
 app.include_router(combined.router, prefix=V1)
@@ -225,6 +229,7 @@ app.include_router(mobile_me.router, prefix=V1)
 app.include_router(mobile_users.router, prefix=V1)
 app.include_router(mobile_scopes.router, prefix=V1)
 app.include_router(integrations_student_platform.router, prefix=V1)
+app.include_router(integrations_student_family.router, prefix=V1)
 
 
 @app.get("/docs", include_in_schema=False)

@@ -196,6 +196,7 @@ class GennisParentRegistration(BaseV2):
         UniqueConstraint("username", name="uq_gpr_username"),
         Index("ix_gpr_phone", "phone"),
         Index("ix_gpr_student", "student_id"),
+        Index("ix_gpr_status", "status"),
     )
 
     id            = Column(BigInteger, primary_key=True, autoincrement=True)
@@ -208,6 +209,56 @@ class GennisParentRegistration(BaseV2):
     password_hash = Column(String(255), nullable=False)
     student_id    = Column(Integer, nullable=True)   # gennis_student.id (their child), if known
     created_at    = Column(DateTime, server_default=func.now())
+
+    # Review workflow — this row used to just sit here with nothing ever
+    # reading it (no approval flow existed at all until this was added).
+    # `reviewed_by`/`linked_user_id` are plain ids rather than ORM
+    # relationships: this is BaseV2 (its own declarative base bound to a
+    # separate alembic track — see the module docstring), so it can't
+    # cross-reference `User` the way app/models.py's own bridge tables do.
+    status         = Column(String(20), nullable=False, server_default="pending")  # pending | approved | rejected
+    reviewed_by    = Column(BigInteger, nullable=True)   # user.id of the staff member who decided this
+    reviewed_at    = Column(DateTime, nullable=True)
+    linked_user_id = Column(BigInteger, nullable=True)   # user.id created for this parent, once approved
+
+
+class ParentChildLink(BaseV2):
+    """Maps a management user with role="parent" to one of their children.
+
+    Lives here (BaseV2/alembic_v2), not in app/models.py's main `Base`,
+    despite covering turon children too: the main `alembic/` track has no
+    tracked migration history in this repo at all (gitignored, zero files
+    ever committed) and isn't run by the deploy pipeline — alembic_v2 is
+    the only migration track actually applied to production on every
+    deploy (see .github/workflows/deploy.yml). A table only the main track
+    knows how to create would need a manual one-off DDL run instead of
+    shipping through the normal PR → merge → deploy flow.
+
+    `child_ref_id` is deliberately the SAME id student_platform already sees
+    when that child logs in themself — gennis_student.gennis_id for a gennis
+    child, this same `user.id` for a turon child (turon has no separate id
+    space, see student_platform.py's login docstring) — not our own
+    internal PKs. That way this table can answer "who are this parent's
+    children" directly in the id space the caller already has, with no
+    translation step, and a mistake here fails obviously (wrong/missing
+    child) rather than silently (right child, wrong id format).
+
+    One row per child, so a parent with several children just gets several
+    rows — there is no cap on how many. No ORM-level relationship to
+    `User` (BaseV2 classes here never declare one — see the module
+    docstring); `parent_user_id` is still a real FK at the DB level.
+    """
+    __tablename__ = "parent_child_link"
+    __table_args__ = (
+        UniqueConstraint("parent_user_id", "source", "child_ref_id", name="uq_parent_child_link"),
+        Index("ix_pcl_parent_user_id", "parent_user_id"),
+    )
+
+    id             = Column(BigInteger, primary_key=True, autoincrement=True)
+    parent_user_id = Column(BigInteger, nullable=False)   # user.id (FK enforced in the migration, not the ORM)
+    source         = Column(String(20), nullable=False)   # "gennis" | "turon"
+    child_ref_id   = Column(Integer, nullable=False)      # gennis_student.gennis_id, or user.id for turon
+    created_at     = Column(DateTime, server_default=func.now())
 
 
 class GennisLessonAttendance(BaseV2):
