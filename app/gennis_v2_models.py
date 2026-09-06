@@ -256,11 +256,22 @@ class ParentChildLink(BaseV2):
     filtered by the child's current branch (see
     app/routers/v1/management/parent_registrations.py's
     delete_parent_child_link docstring for the full reasoning).
+
+    Table name is `parent_child_link_v2`, not the plain `parent_child_link`
+    every other docstring/comment/commit message in this feature refers to
+    by that shorter name — a table with that exact name already exists in
+    production (created 2026-07-29, 25 real rows, untracked by any
+    migration or code in this repo, schema incompatible with this one:
+    gennis-only, no `source` column). Caught before this migration ever
+    ran anywhere, so renamed rather than colliding. That pre-existing
+    table is left untouched pending its own investigation — see the
+    migration file (alembic_v2/versions/e6f7a8b9c0d1_*.py) for the full
+    story.
     """
-    __tablename__ = "parent_child_link"
+    __tablename__ = "parent_child_link_v2"
     __table_args__ = (
-        UniqueConstraint("parent_user_id", "source", "child_ref_id", name="uq_parent_child_link"),
-        Index("ix_pcl_parent_user_id", "parent_user_id"),
+        UniqueConstraint("parent_user_id", "source", "child_ref_id", name="uq_parent_child_link_v2"),
+        Index("ix_pcl_v2_parent_user_id", "parent_user_id"),
     )
 
     id             = Column(BigInteger, primary_key=True, autoincrement=True)
