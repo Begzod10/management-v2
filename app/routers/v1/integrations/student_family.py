@@ -194,12 +194,14 @@ def _in_range(year: int, month: int, from_year: int, from_month: int, to_year: i
     return (from_year, from_month) <= key <= (to_year, to_month)
 
 
-def _debt_balance(raw_amount: Optional[int]) -> dict:
-    """Both gennis_student_credit.balance and turon's CustomUser.balance are
-    plain debt magnitudes in this system — verified against production
-    gennis data (11,882 rows, all >= 0, up to 2,184,530; never negative) —
-    not a signed avans/qarz value. Request #14 asked for a SIGNED `amount`
-    (negative = debt) regardless, so that conversion happens once, here.
+def _gennis_debt_balance(raw_amount: Optional[int]) -> dict:
+    """gennis_student_credit.balance is a plain debt magnitude — verified
+    against production (11,882 rows, all >= 0, up to 2,184,530; never
+    negative). Request #14 asked for a SIGNED `amount` (negative = debt)
+    regardless, so that conversion happens once, here.
+
+    Do NOT reuse this for turon — its CustomUser.balance is a completely
+    different, already-signed convention (see _turon_debt_balance).
     """
     amount = raw_amount or 0
     return {
@@ -209,10 +211,28 @@ def _debt_balance(raw_amount: Optional[int]) -> dict:
     }
 
 
+def _turon_debt_balance(raw_amount: Optional[int]) -> dict:
+    """turon's CustomUser.balance is the OPPOSITE convention from gennis:
+    already signed, negative = debt — verified against production by
+    cross-referencing accounts with a large negative balance (e.g.
+    -45,000,000) against their summed attendances_attendancepermonth.
+    remaining_debt for the same student (66M-82M for those same accounts,
+    consistently) rather than trusting request #14's own uncertainty about
+    the format. Passing this through _gennis_debt_balance's unsigned-input
+    conversion would flip the sign backwards for every turon account.
+    """
+    amount = raw_amount or 0
+    return {
+        "amount": amount,
+        "is_debt": amount < 0,
+        "debt_amount": -amount if amount < 0 else 0,
+    }
+
+
 def _gennis_payments(db: Session, gennis_id: int, fy: int, fm: int, ty: int, tm: int):
     student = db.query(models.GennisStudent.id).filter(models.GennisStudent.gennis_id == gennis_id).first()
     if not student:
-        return _debt_balance(None), []
+        return _gennis_debt_balance(None), []
     internal_id = student.id
 
     credit = (
@@ -220,7 +240,7 @@ def _gennis_payments(db: Session, gennis_id: int, fy: int, fm: int, ty: int, tm:
         .filter(models.GennisStudentCredit.student_id == internal_id)
         .first()
     )
-    balance = _debt_balance(credit.balance if credit else None)
+    balance = _gennis_debt_balance(credit.balance if credit else None)
     if credit:
         balance["updated_at"] = credit.updated_at.isoformat() if credit.updated_at else None
 
@@ -272,14 +292,11 @@ def _turon_payments(db: Session, turon_db: Session, management_user_id: int, fy:
 
     student = resolve_legacy_turon_student(db, turon_db, management_user_id)
     if not student:
-        return _debt_balance(None), [], []
+        return _turon_debt_balance(None), [], []
 
     custom_user = turon_db.query(CustomUser).filter(CustomUser.id == student.user_id).first()
-    # NOTE: sign convention (positive = debt) is verified for gennis, not
-    # for turon — CustomUser.balance's actual meaning still needs
-    # confirming against a real account with known debt before this ships.
     raw_balance = _parse_turon_balance(custom_user.balance if custom_user else None)
-    balance = _debt_balance(raw_balance)
+    balance = _turon_debt_balance(raw_balance)
 
     month_rows = (
         turon_db.query(AttendancePerMonth, Group.name)

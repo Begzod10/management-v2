@@ -7,32 +7,61 @@ get direct tests instead of only exercising them through the full endpoint.
 from __future__ import annotations
 
 from app.routers.v1.integrations.student_family import (
-    _debt_balance,
+    _gennis_debt_balance,
     _in_range,
     _parse_turon_balance,
     _parse_year_month,
     _summarize,
+    _turon_debt_balance,
 )
 
 
-# ── _debt_balance ────────────────────────────────────────────────────────────
+# ── _gennis_debt_balance ─────────────────────────────────────────────────────
 
-def test_zero_balance_is_not_a_debt():
-    result = _debt_balance(0)
+def test_zero_gennis_balance_is_not_a_debt():
+    result = _gennis_debt_balance(0)
     assert result == {"amount": 0, "is_debt": False, "debt_amount": 0}
 
 
-def test_none_balance_is_treated_as_zero():
-    result = _debt_balance(None)
+def test_none_gennis_balance_is_treated_as_zero():
+    result = _gennis_debt_balance(None)
     assert result == {"amount": 0, "is_debt": False, "debt_amount": 0}
 
 
-def test_positive_raw_balance_becomes_a_negative_signed_debt():
+def test_positive_gennis_balance_becomes_a_negative_signed_debt():
     # gennis_student_credit.balance is a plain (always >= 0) debt
     # magnitude, verified against production data — request #14 wants a
     # SIGNED amount (negative = debt), so the conversion happens once here.
-    result = _debt_balance(450000)
+    result = _gennis_debt_balance(450000)
     assert result == {"amount": -450000, "is_debt": True, "debt_amount": 450000}
+
+
+# ── _turon_debt_balance ──────────────────────────────────────────────────────
+# turon's CustomUser.balance is the OPPOSITE raw convention from gennis:
+# already signed, negative = debt — verified against production by
+# cross-referencing large-negative-balance accounts against their summed
+# attendances_attendancepermonth.remaining_debt (consistently large and
+# positive for the same accounts). Running a turon value through gennis's
+# conversion would silently flip real debt into "no debt".
+
+def test_zero_turon_balance_is_not_a_debt():
+    result = _turon_debt_balance(0)
+    assert result == {"amount": 0, "is_debt": False, "debt_amount": 0}
+
+
+def test_none_turon_balance_is_treated_as_zero():
+    result = _turon_debt_balance(None)
+    assert result == {"amount": 0, "is_debt": False, "debt_amount": 0}
+
+
+def test_negative_turon_balance_is_a_debt():
+    result = _turon_debt_balance(-45000000)
+    assert result == {"amount": -45000000, "is_debt": True, "debt_amount": 45000000}
+
+
+def test_positive_turon_balance_is_not_a_debt():
+    result = _turon_debt_balance(131233)
+    assert result == {"amount": 131233, "is_debt": False, "debt_amount": 0}
 
 
 # ── _parse_turon_balance ─────────────────────────────────────────────────────
