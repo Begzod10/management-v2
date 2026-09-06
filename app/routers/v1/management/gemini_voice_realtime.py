@@ -1,7 +1,13 @@
 """Gemini Live API voice chat — WebSocket proxy.
 
 The browser connects to:
-    ws://.../api/v1/gemini-voice/ws?creator_id=<id>
+    ws://.../api/v1/gemini-voice/ws?creator_id=<id>&token=<access_token>
+
+`token` must decode (via the same JWT check the REST API uses) to the exact
+user named by creator_id — see authenticate_voice_ws_creator in
+realtime_session.py. Without it, creator_id alone is just a client-supplied
+claim, and anyone able to reach this endpoint could impersonate any user by
+guessing their id.
 
 Audio format (IMPORTANT — different from OpenAI version):
   Client → Server : raw PCM-16, 16 000 Hz mono (16kHz)
@@ -35,9 +41,8 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query
 
 from app.config import settings
 from app.database import SessionLocal
-from app.models import User
 from app.services.gemini_realtime_session import build_setup_message
-from app.services.realtime_session import dispatch_function_call
+from app.services.realtime_session import authenticate_voice_ws_creator, dispatch_function_call
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +61,7 @@ _GEMINI_WS_BASE = (
 async def gemini_voice_ws(
     websocket: WebSocket,
     creator_id: int = Query(..., description="ID of the user starting the voice session"),
+    token: str = Query(..., description="Access token proving the caller is creator_id"),
 ):
     """
     Bidirectional voice chat proxy to Google Gemini Live API.
@@ -71,10 +77,11 @@ async def gemini_voice_ws(
 
     db = SessionLocal()
     try:
-        creator = db.query(User).filter(User.id == creator_id, User.deleted == False).first()
+        creator = authenticate_voice_ws_creator(token, creator_id, db)
         if not creator:
-            await _send_json(websocket, {"type": "error", "message": "Creator not found"})
+            await _send_json(websocket, {"type": "error", "message": "Unauthorized"})
             await websocket.close(code=1008)
+            db.close()
             return
     except Exception as exc:
         logger.error("DB error validating creator %s: %s", creator_id, exc)
@@ -134,8 +141,11 @@ async def gemini_voice_ws(
         logger.warning("Gemini Live WS closed (creator=%s): code=%s reason=%s", creator_id, exc.code, exc.reason)
         await _send_json(websocket, {"type": "error", "message": f"Gemini closed: code={exc.code} reason={exc.reason}"})
     except Exception as exc:
+        # Log the real exception server-side only — an arbitrary internal
+        # Python exception string is not for the client (could carry file
+        # paths, driver error text, etc.).
         logger.exception("Gemini voice session error (creator=%s): %s", creator_id, exc)
-        await _send_json(websocket, {"type": "error", "message": str(exc)})
+        await _send_json(websocket, {"type": "error", "message": "Ovozli sessiya xatoligi"})
     finally:
         db.close()
         try:
@@ -168,7 +178,7 @@ async def _wait_for_setup(gemini_ws, client_ws: WebSocket, timeout: float = 10.0
         await _send_json(client_ws, {"type": "error", "message": "Gemini setup timed out"})
     except Exception as exc:
         logger.exception("Gemini setup exception: %s", exc)
-        await _send_json(client_ws, {"type": "error", "message": str(exc)})
+        await _send_json(client_ws, {"type": "error", "message": "Gemini sozlash xatoligi"})
     return False
 
 
@@ -279,7 +289,9 @@ async def _gemini_to_client(client_ws: WebSocket, gemini_ws, db, creator_id: int
             tool_call = event.get("toolCall", {})
             fn_calls = tool_call.get("functionCalls", [])
             if fn_calls:
-                logger.warning("Gemini toolCall received: %s", [fc.get("name") for fc in fn_calls])
+                # debug, not warning/info — this carries live session content
+                # (mission titles/descriptions/names), not just diagnostics.
+                logger.debug("Gemini toolCall received: %s", [fc.get("name") for fc in fn_calls])
                 responses = []
                 for fc in fn_calls:
                     call_id = fc.get("id", "")
@@ -287,9 +299,9 @@ async def _gemini_to_client(client_ws: WebSocket, gemini_ws, db, creator_id: int
                     args = fc.get("args", {})
                     args_str = json.dumps(args) if isinstance(args, dict) else str(args)
 
-                    logger.warning("Dispatching %s args=%s", fn_name, args_str[:200])
+                    logger.debug("Dispatching %s args=%s", fn_name, args_str[:200])
                     result_str = dispatch_function_call(fn_name, args_str, db, creator_id)
-                    logger.warning("Result for %s: %s", fn_name, result_str[:200])
+                    logger.debug("Result for %s: %s", fn_name, result_str[:200])
 
                     # Notify client if a mission was created
                     if fn_name == "create_mission":

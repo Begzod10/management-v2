@@ -1,7 +1,13 @@
 """OpenAI Realtime API voice chat — WebSocket proxy.
 
 The browser connects to:
-    ws://.../api/v1/voice-realtime/ws?creator_id=<id>
+    ws://.../api/v1/voice-realtime/ws?creator_id=<id>&token=<access_token>
+
+`token` must decode (via the same JWT check the REST API uses) to the exact
+user named by creator_id — see authenticate_voice_ws_creator in
+realtime_session.py. Without it, creator_id alone is just a client-supplied
+claim, and anyone able to reach this endpoint could impersonate any user by
+guessing their id.
 
 The backend then opens a WebSocket to OpenAI's Realtime API and bridges them.
 
@@ -37,8 +43,8 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.database import get_db
-from app.models import User
 from app.services.realtime_session import (
+    authenticate_voice_ws_creator,
     build_session_update,
     build_uzbek_primer,
     dispatch_function_call,
@@ -61,6 +67,7 @@ async def _send_json(ws, data: dict):
 async def voice_realtime_ws(
     websocket: WebSocket,
     creator_id: int = Query(..., description="ID of the user starting the voice session"),
+    token: str = Query(..., description="Access token proving the caller is creator_id"),
 ):
     """
     Bidirectional voice chat proxy to OpenAI Realtime API.
@@ -81,10 +88,11 @@ async def voice_realtime_ws(
     from app.database import SessionLocal
     db: Session = SessionLocal()
     try:
-        creator = db.query(User).filter(User.id == creator_id, User.deleted == False).first()
+        creator = authenticate_voice_ws_creator(token, creator_id, db)
         if not creator:
-            await _send_client_json(websocket, {"type": "error", "message": "Creator not found"})
+            await _send_client_json(websocket, {"type": "error", "message": "Unauthorized"})
             await websocket.close(code=1008)
+            db.close()
             return
     except Exception as exc:
         logger.error("DB error validating creator %s: %s", creator_id, exc)
@@ -151,8 +159,11 @@ async def voice_realtime_ws(
             "message": f"OpenAI connection closed: code={exc.code} reason={exc.reason}",
         })
     except Exception as exc:
-        logger.error("Realtime session error (creator=%s): %s", creator_id, exc)
-        await _send_client_json(websocket, {"type": "error", "message": str(exc)})
+        # Log the real exception server-side only — see the matching note in
+        # gemini_voice_realtime.py; an arbitrary internal exception string is
+        # not for the client.
+        logger.exception("Realtime session error (creator=%s): %s", creator_id, exc)
+        await _send_client_json(websocket, {"type": "error", "message": "Ovozli sessiya xatoligi"})
     finally:
         db.close()
         try:
@@ -213,7 +224,9 @@ async def _openai_to_client(client_ws: WebSocket, openai_ws, db: Session, creato
                 continue
 
             etype = event.get("type", "")
-            logger.warning("OpenAI event: %s | %s", etype, json.dumps(event)[:300])
+            # debug, not warning — this carries live session content
+            # (transcripts, mission fields), not just diagnostics.
+            logger.debug("OpenAI event: %s | %s", etype, json.dumps(event)[:300])
 
             # ── Voice activity detection ──────────────────────────────────────
             if etype == "input_audio_buffer.speech_started":
