@@ -30,14 +30,10 @@ from app.config import settings
 from app.models import Mission, User
 from app.tasks import send_telegram_notification
 from app.services.telegram import tpl_assigned
-from app.services.voice_assignment import (
+from app.services.realtime_session import (
     _executor_dict,
-    _NON_EXECUTOR_ROLES,
-    _check_voice_assignment,
-    _effective_role,
-    _OWNER_ROLES,
-    _ROLE_CAN_ASSIGN,
-    _PROJECT_SCOPED_ROLES,
+    check_voice_assignment,
+    voice_eligible_executors,
 )
 
 logger = logging.getLogger(__name__)
@@ -184,18 +180,7 @@ async def prepare_telegram_voice(file_id: str, creator_id: int, db: Session) -> 
     logger.info("Telegram voice transcript (creator=%s): %s", creator_id, transcript)
 
     creator = db.query(User).filter(User.id == creator_id, User.deleted == False).first()
-    base = db.query(User).filter(User.deleted == False, User.is_active == True).order_by(User.name)
-
-    if creator and creator.role not in _OWNER_ROLES:
-        creator_role = _effective_role(creator)
-        if creator_role in _PROJECT_SCOPED_ROLES:
-            users = [creator]
-        else:
-            allowed_roles = _ROLE_CAN_ASSIGN.get(creator_role, set()) | {creator.role}
-            users = base.filter(User.role.in_(allowed_roles)).all()
-    else:
-        users = base.filter(~User.role.in_(_NON_EXECUTOR_ROLES)).all()
-
+    users = voice_eligible_executors(creator, db) if creator else []
     executors = [_executor_dict(u, db) for u in users]
 
     try:
@@ -227,7 +212,7 @@ async def prepare_telegram_voice(file_id: str, creator_id: int, db: Session) -> 
         return {"ok": False, "error": "Ijrochi aniqlanmadi", "transcript": transcript, "title": title}
 
     if creator:
-        err = _check_voice_assignment(creator, executor)
+        err = check_voice_assignment(creator, executor, db)
         if err:
             return {"ok": False, "error": err, "transcript": transcript}
 

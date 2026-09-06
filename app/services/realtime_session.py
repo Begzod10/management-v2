@@ -8,6 +8,11 @@ Ported from the old (V1) gennis_management app. Unlike V1 — which kept its
 own private copy of the role-assignment rules — this version reuses the
 missions router's own `_eligible_executors`/`OWNER_ROLES`/`has_role` so voice
 assignment permissions can never drift from the REST API's rules.
+
+`voice_eligible_executors`/`check_voice_assignment`/`_executor_dict` below
+are also imported by telegram_voice.py (the Telegram voice-note → mission
+pipeline) — the two voice-driven mission-creation paths share one set of
+assignment rules instead of each keeping its own copy.
 """
 
 from __future__ import annotations
@@ -222,20 +227,34 @@ def _executor_dict(u: User, db: Session) -> dict:
     return entry
 
 
-def _voice_eligible_executors(creator: User, db: Session) -> list[User]:
-    """Executors the creator may assign to via voice — same rule the REST
-    `/missions/` endpoint enforces (`_eligible_executors`), passed a "voice"
-    channel so it never matches the `service_request` special-case. A voice
-    session has no project_id/section_id to offer, so a manager who needs one
-    gets self-assign only, exactly as an HTTP request without one would."""
+def voice_eligible_executors(creator: User, db: Session) -> list[User]:
+    """Executors the creator may assign to via any voice-driven mission-creation
+    path (the live mic widget here, and the Telegram voice-note pipeline in
+    telegram_voice.py) — same rule the REST `/missions/` endpoint enforces
+    (`_eligible_executors`), passed a "voice" channel so it never matches the
+    `service_request` special-case. Voice has no project_id/section_id to
+    offer, so a manager who needs one gets self-assign only, exactly as an
+    HTTP request without one would."""
     return _eligible_executors(creator, "voice", None, None, db)
+
+
+def check_voice_assignment(creator: User, executor: User, db: Session) -> Optional[str]:
+    """Return an error string if creator may not assign to executor via voice,
+    else None. Shared by every voice-driven mission-creation path so none of
+    them can drift from the REST API's actual assignment rules."""
+    if creator.id == executor.id or has_role(creator, *OWNER_ROLES):
+        return None
+    eligible_ids = {u.id for u in voice_eligible_executors(creator, db)}
+    if executor.id not in eligible_ids:
+        return f"Your role ('{creator.role}') is not allowed to assign missions to '{executor.name} {executor.surname}'."
+    return None
 
 
 def handle_list_executors(args: dict, db: Session, creator_id: int) -> str:
     creator = db.query(User).filter(User.id == creator_id, User.deleted == False).first()
     if not creator:
         return json.dumps({"executors": []})
-    users = _voice_eligible_executors(creator, db)
+    users = voice_eligible_executors(creator, db)
     return json.dumps({"executors": [_executor_dict(u, db) for u in users]}, ensure_ascii=False)
 
 
@@ -267,7 +286,7 @@ def handle_search_executor_by_name(args: dict, db: Session, creator_id: int) -> 
     creator = db.query(User).filter(User.id == creator_id, User.deleted == False).first()
     allowed_ids: set[int] | None = None
     if creator and not has_role(creator, *OWNER_ROLES):
-        allowed_ids = {u.id for u in _voice_eligible_executors(creator, db)}
+        allowed_ids = {u.id for u in voice_eligible_executors(creator, db)}
 
     def _search(term: str):
         pattern = f"%{term}%"
@@ -335,12 +354,10 @@ def handle_create_mission(args: dict, db: Session, creator_id: int) -> str:
         return json.dumps({"error": f"Executor with id {executor_id} not found"})
 
     creator_user = db.query(User).filter(User.id == creator_id, User.deleted == False).first()
-    if creator_user and creator_user.id != executor.id and not has_role(creator_user, *OWNER_ROLES):
-        eligible_ids = {u.id for u in _voice_eligible_executors(creator_user, db)}
-        if executor.id not in eligible_ids:
-            return json.dumps({
-                "error": f"Your role ('{creator_user.role}') is not allowed to assign missions to '{executor.name} {executor.surname}'.",
-            })
+    if creator_user:
+        err = check_voice_assignment(creator_user, executor, db)
+        if err:
+            return json.dumps({"error": err})
 
     deadline_days = max(1, int(args.get("deadline_days", 3)))
     deadline = date.today() + timedelta(days=deadline_days)
