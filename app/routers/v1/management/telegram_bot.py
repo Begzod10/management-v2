@@ -11,6 +11,7 @@ from app.config import settings
 from app.tasks import send_telegram_notification
 from app.routers.v1.auth import get_current_user
 from app.mobile.telegram import consume_mobile_link_code, resolve_mobile_link_code
+from app.services.telegram import esc_html
 from app.services.telegram_voice import prepare_telegram_voice, create_mission_from_pending
 
 router = APIRouter(prefix="/telegram", tags=["Telegram"])
@@ -208,10 +209,10 @@ async def telegram_webhook(
                 _redis.delete(pending_key)
                 reply = (
                     f"✅ <b>Vazifa yaratildi!</b>\n\n"
-                    f"📋 {result['title']}\n"
-                    f"👤 Ijrochi: <b>{result['executor']}</b>\n"
-                    f"📅 Muddat: {result['deadline']}\n"
-                    f"🔖 Kategoriya: {result['category']}\n"
+                    f"📋 {esc_html(result['title'])}\n"
+                    f"👤 Ijrochi: <b>{esc_html(result['executor'])}</b>\n"
+                    f"📅 Muddat: {esc_html(result['deadline'])}\n"
+                    f"🔖 Kategoriya: {esc_html(result['category'])}\n"
                     f"🆔 ID: <code>{result['mission_id']}</code>"
                 )
                 send_telegram_notification.delay(chat_id, reply)
@@ -245,28 +246,28 @@ async def telegram_webhook(
                 created = create_mission_from_pending(result, deadline_days, db)
                 reply = (
                     f"✅ <b>Vazifa yaratildi!</b>\n\n"
-                    f"📋 {created['title']}\n"
-                    f"👤 Ijrochi: <b>{created['executor']}</b>\n"
-                    f"📅 Muddat: {created['deadline']}\n"
-                    f"🔖 Kategoriya: {created['category']}\n"
+                    f"📋 {esc_html(created['title'])}\n"
+                    f"👤 Ijrochi: <b>{esc_html(created['executor'])}</b>\n"
+                    f"📅 Muddat: {esc_html(created['deadline'])}\n"
+                    f"🔖 Kategoriya: {esc_html(created['category'])}\n"
                     f"🆔 ID: <code>{created['mission_id']}</code>"
                 )
             else:
                 # No deadline in voice → ask user
                 _redis.setex(f"tg_voice_pending:{chat_id}", 120, _json.dumps(result))
                 reply = (
-                    f"🎯 <b>{result['title']}</b>\n"
-                    f"👤 Ijrochi: <b>{result['executor_name']}</b>\n"
-                    f"🔖 Kategoriya: {result['category']}\n\n"
+                    f"🎯 <b>{esc_html(result['title'])}</b>\n"
+                    f"👤 Ijrochi: <b>{esc_html(result['executor_name'])}</b>\n"
+                    f"🔖 Kategoriya: {esc_html(result['category'])}\n\n"
                     f"📅 Muddat necha kun?\n"
                     f"<i>Raqam yuboring (standart: <b>{deadline_days}</b>)</i>"
                 )
         else:
-            reply = "❌ " + result.get("error", "Noma'lum xato")
+            reply = "❌ " + esc_html(result.get("error", "Noma'lum xato"))
             if result.get("transcript"):
-                reply += f"\n\n🎤 <i>{result['transcript']}</i>"
+                reply += f"\n\n🎤 <i>{esc_html(result['transcript'])}</i>"
             if result.get("title"):
-                reply += f"\n📋 Sarlavha: {result['title']}"
+                reply += f"\n📋 Sarlavha: {esc_html(result['title'])}"
 
         send_telegram_notification.delay(chat_id, reply)
 

@@ -5,8 +5,9 @@ search_executor_by_name, create_mission), and the logic that executes
 those tools against the management database.
 
 Ported from the old (V1) gennis_management app. Unlike V1 — which kept its
-own private copy of the role-assignment rules — this version reuses the
-missions router's own `_eligible_executors`/`OWNER_ROLES`/`has_role` so voice
+own private copy of the role-assignment rules — this version reuses
+app.services.mission_eligibility's `_eligible_executors`/`OWNER_ROLES` (the
+same rules the REST missions router enforces) plus `has_role`, so voice
 assignment permissions can never drift from the REST API's rules.
 
 `voice_eligible_executors`/`check_voice_assignment`/`_executor_dict` below
@@ -24,6 +25,7 @@ from typing import Any, Optional
 
 from sqlalchemy.orm import Session
 
+from app.core.security import decode_access_token
 from app.dependencies import has_role
 from app.models import Mission, Tag, User, Job
 try:
@@ -32,7 +34,7 @@ except ImportError:
     _UserSkill = None
 from app.tasks import send_telegram_notification
 from app.services.telegram import tpl_assigned
-from app.routers.v1.management.missions import OWNER_ROLES, _eligible_executors
+from app.services.mission_eligibility import OWNER_ROLES, _eligible_executors
 
 logger = logging.getLogger(__name__)
 
@@ -250,6 +252,39 @@ def check_voice_assignment(creator: User, executor: User, db: Session) -> Option
     return None
 
 
+def authenticate_voice_ws_creator(token: str, creator_id: int, db: Session) -> Optional[User]:
+    """Validate a voice WebSocket session's bearer token and confirm it belongs
+    to the claimed creator_id, returning that User or None.
+
+    Both /gemini-voice/ws and /voice-realtime/ws take the acting user's id as a
+    plain query param, because a WebSocket handshake can't carry an
+    Authorization header the way a REST call can. On its own that creator_id is
+    just a client-supplied claim — without this check, anyone who could reach
+    the endpoint could impersonate any user by guessing their id, list every
+    executor's name/skills/job title via the `list_executors` tool, and create
+    missions "as" that user (gated only by *that* user's own assignment rights,
+    so impersonating an owner grants assign-to-anyone). VoiceContext.tsx already
+    sends the same JWT the REST API trusts as a `token` query param for exactly
+    this purpose; this decodes it with the same helper `get_current_user` uses
+    and requires it resolve to the exact user named by creator_id.
+    """
+    try:
+        payload = decode_access_token(token)
+    except ValueError:
+        return None
+    sub = payload.get("sub")
+    if not sub:
+        return None
+    user = (
+        db.query(User)
+        .filter((User.email == sub) | (User.username == sub), User.deleted == False)
+        .first()
+    )
+    if not user or not user.is_active or user.id != creator_id:
+        return None
+    return user
+
+
 def handle_list_executors(args: dict, db: Session, creator_id: int) -> str:
     creator = db.query(User).filter(User.id == creator_id, User.deleted == False).first()
     if not creator:
@@ -347,7 +382,13 @@ def handle_create_mission(args: dict, db: Session, creator_id: int) -> str:
     if not executor_id:
         return json.dumps({"error": "executor_id is required"})
 
-    _creator_id = args.get("creator_id", creator_id)
+    # creator_id always comes from the trusted session context passed into
+    # dispatch_function_call — never from the tool-call args. The `create_mission`
+    # tool schema never declares a creator_id parameter, but the AI's raw
+    # function-call payload isn't guaranteed to be free of extra keys (e.g. via
+    # prompt injection in the transcribed audio), and honoring one here would
+    # let it write a false creator into the Mission row and the Telegram
+    # notification without actually bypassing check_voice_assignment below.
 
     executor = db.query(User).filter(User.id == executor_id, User.deleted == False).first()
     if not executor:
@@ -373,7 +414,7 @@ def handle_create_mission(args: dict, db: Session, creator_id: int) -> str:
         description=description,
         category=category,
         executor_id=executor_id,
-        creator_id=_creator_id,
+        creator_id=creator_id,
         deadline=deadline,
         status="not_started",
         kpi_weight=10,
@@ -390,8 +431,8 @@ def handle_create_mission(args: dict, db: Session, creator_id: int) -> str:
     executor_name = f"{executor.name} {executor.surname}".strip()
     logger.info("Voice mission created: id=%s title=%s executor=%s", mission.id, title, executor_name)
 
-    creator = db.query(User).filter(User.id == _creator_id).first()
-    creator_name = f"{creator.name} {creator.surname}".strip() if creator else "AI Assistant"
+    # Reuse the creator_user already fetched above instead of re-querying.
+    creator_name = f"{creator_user.name} {creator_user.surname}".strip() if creator_user else "AI Assistant"
     if executor.telegram_id:
         send_telegram_notification.delay(
             executor.telegram_id,

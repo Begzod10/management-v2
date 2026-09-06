@@ -22,6 +22,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session, selectinload
 
 from app.database import get_db
+from app.dependencies import get_current_user
 from app.models import Mission, MissionHistory, User, Job
 from app.services.openai_assistant import (
     ExecutorCandidate,
@@ -29,6 +30,7 @@ from app.services.openai_assistant import (
     OpenAIError,
     suggest_executors,
 )
+from app.services.realtime_session import voice_eligible_executors
 from app.services.voice_assistant import (
     VoiceAssistantError,
     VoiceMissionProposal,
@@ -147,9 +149,9 @@ def _enrich_suggestion(s: ExecutorSuggestion, candidates: List[ExecutorCandidate
 @router.post("/transcribe", response_model=VoiceTranscribeResponse)
 async def transcribe_and_propose(
     audio: UploadFile = File(...),
-    creator_id: int = Query(..., description="ID of the user sending the voice message"),
     top_k: int = Query(3, ge=1, le=10, description="Max executor suggestions per proposal"),
     db: Session = Depends(get_db),
+    creator: User = Depends(get_current_user),
 ):
     """
     Upload a voice message. Returns a transcript and a list of mission proposals,
@@ -157,12 +159,12 @@ async def transcribe_and_propose(
 
     The caller should display the proposals, let the manager adjust, then POST to
     /missions/ with the confirmed data to actually create the missions.
-    """
-    # Validate creator exists and has a role that can create missions
-    creator = db.query(User).filter(User.id == creator_id, User.deleted == False).first()
-    if not creator:
-        raise HTTPException(status_code=404, detail="Creator not found")
 
+    The acting user comes from the authenticated session (get_current_user),
+    not a client-supplied id — this endpoint used to take `creator_id` as a
+    plain query param with no auth at all, so anyone could pass any id and get
+    back a full staff-directory dump plus billable Whisper/GPT calls for free.
+    """
     # Validate file type
     filename = audio.filename or "voice.mp3"
     ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
@@ -186,8 +188,12 @@ async def transcribe_and_propose(
     try:
         transcript = transcribe_audio(audio_bytes, filename)
     except VoiceAssistantError as exc:
-        logger.warning("Whisper transcription failed for creator %s: %s", creator_id, exc)
-        raise HTTPException(status_code=502, detail=f"Transcription failed: {exc}")
+        # Log the real upstream error server-side only — the raw Whisper HTTP
+        # body (surfaced by transcribe_audio's exception text) is not for the
+        # client, since this endpoint is now reachable by any authenticated
+        # user and shouldn't hand back internal API details to probe.
+        logger.warning("Whisper transcription failed for creator %s: %s", creator.id, exc)
+        raise HTTPException(status_code=502, detail="Ovozni matnga o'girib bo'lmadi")
 
     if not transcript.strip():
         raise HTTPException(status_code=422, detail="Audio contained no recognisable speech.")
@@ -196,21 +202,27 @@ async def transcribe_and_propose(
     try:
         proposals: List[VoiceMissionProposal] = extract_missions(transcript)
     except VoiceAssistantError as exc:
-        logger.warning("Mission extraction failed for creator %s: %s", creator_id, exc)
-        raise HTTPException(status_code=502, detail=f"Mission extraction failed: {exc}")
+        logger.warning("Mission extraction failed for creator %s: %s", creator.id, exc)
+        raise HTTPException(status_code=502, detail="Vazifani tushunib bo'lmadi")
 
     if not proposals:
         return VoiceTranscribeResponse(transcript=transcript, proposals=[])
 
-    # Step 3: Load active management users as executor candidates
+    # Step 3: Load executor candidates scoped to who this creator may actually
+    # assign to — same rule the WS/Telegram voice paths and the REST /missions/
+    # endpoint enforce. This used to load every active user in the company
+    # regardless of the (unauthenticated) caller's role.
+    eligible_ids = [u.id for u in voice_eligible_executors(creator, db)]
     active_users = (
         db.query(User)
         .options(
             selectinload(User.section_memberships),
             selectinload(User.project_memberships),
         )
-        .filter(User.deleted == False, User.is_active == True)
+        .filter(User.id.in_(eligible_ids))
         .all()
+        if eligible_ids
+        else []
     )
     candidates = [_to_candidate(u, db) for u in active_users]
 
