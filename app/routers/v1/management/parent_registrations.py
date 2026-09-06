@@ -14,6 +14,12 @@ child), and approve it into a real `User(role="parent")`.
 already returns when that child logs in themself (gennis_student.gennis_id
 for gennis, this same `user.id` for turon — see student_platform_login's
 docstring) so nothing downstream needs a second translation step.
+
+`create_parent_manually` covers the case a registration row can't: turon has
+no self-service registration surface at all (confirmed — no equivalent
+table, no submission flow in turon_platform or turon-v2), so a turon-only
+parent, or any parent staff sign up directly, gets created here instead of
+through the approve/reject flow above.
 """
 import re
 from datetime import datetime
@@ -23,6 +29,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.core.security import get_password_hash
 from app.database import get_db
 from app.dependencies import require_roles
 from app.gennis_v2_models import GennisParentRegistration, ParentChildLink
@@ -30,6 +37,8 @@ from app.models import GennisStudent, User
 from app.schemas import (
     ParentChildLinkCreate,
     ParentChildLinkOut,
+    ParentManualCreate,
+    ParentManualCreateOut,
     ParentRegistrationApprove,
     ParentRegistrationOut,
 )
@@ -186,6 +195,75 @@ def reject_registration(
     return reg
 
 
+@router.post("/manual", response_model=ParentManualCreateOut, status_code=201)
+def create_parent_manually(
+    data: ParentManualCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles(*ADMIN_ROLES)),
+):
+    """Create a parent account with no gennis_parent_registration row behind
+    it at all.
+
+    gennis-v2's public form (which fills gennis_parent_registration) is the
+    ONLY self-service parent registration surface that exists anywhere in
+    this system — turon has none (confirmed: no equivalent table, no
+    registration flow in turon_platform or turon-v2's own API). Rather than
+    build a speculative "TuronParentRegistration" table with no submitter
+    to ever write to it, this covers the same need staff-side: a parent
+    calls or comes in, staff create the account and attach whichever
+    children (gennis, turon, or both) directly, in one call.
+
+    Unlike approve_registration, the password here is a fresh plaintext
+    value from this request, not a hash carried over from another system —
+    so it's hashed the normal way (get_password_hash), not checked against
+    _looks_like_a_password_hash.
+    """
+    if db.query(User.id).filter(User.username == data.username).first():
+        raise HTTPException(
+            status_code=409,
+            detail=f"username '{data.username}' is already taken by an existing account",
+        )
+
+    seen = set()
+    for child in data.children:
+        key = (child.source, child.child_ref_id)
+        if key in seen:
+            raise HTTPException(status_code=422, detail=f"Duplicate child in request: {key}")
+        seen.add(key)
+        _resolve_child(child.source, child.child_ref_id, db)
+
+    user = User(
+        name=data.name,
+        surname=data.surname,
+        username=data.username,
+        hashed_password=get_password_hash(data.password),
+        role="parent",
+        is_active=True,
+    )
+    db.add(user)
+    db.flush()
+
+    links = [
+        ParentChildLink(parent_user_id=user.id, source=child.source, child_ref_id=child.child_ref_id)
+        for child in data.children
+    ]
+    for link in links:
+        db.add(link)
+
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail=f"username '{data.username}' is already taken by an existing account",
+        )
+    for link in links:
+        db.refresh(link)
+
+    return {"user_id": user.id, "username": user.username, "children": links}
+
+
 # ── Parent-child links (add/remove a child after approval) ────────────────────
 
 @links_router.get("/", response_model=List[ParentChildLinkOut])
@@ -247,6 +325,19 @@ def delete_parent_child_link(
     db: Session = Depends(get_db),
     _: User = Depends(require_roles(*ADMIN_ROLES)),
 ):
+    """This is the answer to request #12's "child leaves the school"
+    question: neither GennisStudent nor turon's Student row carries an
+    active/left flag or a branch this table could filter on (checked both
+    models directly), so there's no signal anywhere to auto-revoke a link
+    on departure — staff calling this endpoint IS the mechanism.
+
+    A branch TRANSFER needs no handling at all, here or anywhere else:
+    attendance/payment records are per-group (`group_id`/`group_name` on
+    each individual record — see student_family.py), not filtered by the
+    child's current branch, so old records keep showing the old branch's
+    groups and new ones show the new branch's, under the same continuous
+    gennis_id/turon user.id identity. Nothing to unlink or migrate.
+    """
     link = db.query(ParentChildLink).filter(ParentChildLink.id == link_id).first()
     if not link:
         raise HTTPException(status_code=404, detail="Link not found")

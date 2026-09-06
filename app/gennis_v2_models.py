@@ -247,6 +247,15 @@ class ParentChildLink(BaseV2):
     rows — there is no cap on how many. No ORM-level relationship to
     `User` (BaseV2 classes here never declare one — see the module
     docstring); `parent_user_id` is still a real FK at the DB level.
+
+    No status/active flag: a child leaving the school has no automatic
+    effect on this row (neither GennisStudent nor turon's Student row
+    tracks "left" or a current branch to key off) — a staff-initiated
+    delete is the only way a link ends. A branch TRANSFER needs no
+    handling at all — attendance/payment records are per-group, not
+    filtered by the child's current branch (see
+    app/routers/v1/management/parent_registrations.py's
+    delete_parent_child_link docstring for the full reasoning).
     """
     __tablename__ = "parent_child_link"
     __table_args__ = (

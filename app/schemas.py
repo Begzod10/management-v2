@@ -1,4 +1,4 @@
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 from datetime import date, datetime
 from typing import Optional, List
 from enum import Enum
@@ -1064,5 +1064,24 @@ class ParentChildLinkOut(BaseModel):
     child_ref_id: int
     created_at: Optional[datetime]
     model_config = {"from_attributes": True}
+
+
+class ParentManualCreate(BaseModel):
+    """For onboarding a parent with no gennis_parent_registration row to
+    approve — a turon-only parent (gennis-v2's public form is the only
+    self-service submission path that exists; turon has none), or a gennis
+    parent staff sign up in person/by phone rather than through that form.
+    """
+    name: str
+    surname: str
+    username: str = Field(..., min_length=3, max_length=100)
+    password: str = Field(..., min_length=6)
+    children: List[ParentRegistrationChild] = []
+
+
+class ParentManualCreateOut(BaseModel):
+    user_id: int
+    username: str
+    children: List[ParentChildLinkOut]
 
 
