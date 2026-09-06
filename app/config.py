@@ -35,6 +35,16 @@ class Settings:
     OPENAI_BASE_URL: str = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
     OPENAI_MODEL: str = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
     OPENAI_WHISPER_MODEL: str = os.getenv("OPENAI_WHISPER_MODEL", "whisper-1")
+    # OpenAI Realtime voice chat (WebSocket proxy) — /voice-realtime/ws
+    OPENAI_REALTIME_URL: str = os.getenv("OPENAI_REALTIME_URL", "wss://api.openai.com/v1/realtime")
+    OPENAI_REALTIME_MODEL: str = os.getenv("OPENAI_REALTIME_MODEL", "gpt-4o-realtime-preview")
+    # Gemini Live voice chat (WebSocket proxy) — /gemini-voice/ws
+    GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
+    GEMINI_REALTIME_MODEL: str = os.getenv("GEMINI_REALTIME_MODEL", "models/gemini-2.5-flash-native-audio-latest")
+    GEMINI_VOICE: str = os.getenv("GEMINI_VOICE", "Kore")
+    # Optional HTTP/SOCKS5 proxy for the Gemini Live WebSocket, falls back to
+    # TELEGRAM_PROXY above when unset (same hosting-provider blocking concern).
+    GEMINI_PROXY: str = os.getenv("GEMINI_PROXY", "")
 
 
 settings = Settings()
