@@ -11,6 +11,7 @@ import re
 from app import models
 from app.database import get_db
 from app.dependencies import get_current_user
+from app.services.user_lookup import find_user_by_username_or_email
 from app.core.security import (
     verify_password,
     get_password_hash,
@@ -205,13 +206,7 @@ def login(
 ):
     """Login with email and password"""
 
-    from sqlalchemy import or_
-    user = db.query(models.User).filter(
-        or_(
-            models.User.email == login_data.email,
-            models.User.username == login_data.email,
-        )
-    ).first()
+    user = find_user_by_username_or_email(db, login_data.email)
 
     if not user:
         raise HTTPException(
