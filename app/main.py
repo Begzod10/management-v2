@@ -43,6 +43,7 @@ from .routers.v1.turon import (
     terms as turon_terms, timetable as turon_timetable,
 )
 from .routers.v1.integrations import student_platform as integrations_student_platform
+from .routers.v1.integrations import student_platform_directory as integrations_student_platform_directory
 from .routers.v1.integrations import student_family as integrations_student_family
 from .mobile import (
     auth as mobile_auth,
@@ -229,6 +230,7 @@ app.include_router(mobile_me.router, prefix=V1)
 app.include_router(mobile_users.router, prefix=V1)
 app.include_router(mobile_scopes.router, prefix=V1)
 app.include_router(integrations_student_platform.router, prefix=V1)
+app.include_router(integrations_student_platform_directory.router, prefix=V1)
 app.include_router(integrations_student_family.router, prefix=V1)
 
 
