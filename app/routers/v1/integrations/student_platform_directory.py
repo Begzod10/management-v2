@@ -17,21 +17,24 @@ router = APIRouter(prefix="/integrations/student-platform", tags=["Integrations"
 _SOURCES = {"gennis", "turon"}
 _ROLES = {"student", "teacher"}
 
-# request #24 §C: a plain PARENT test account's own token could pull the
-# WHOLE school's student and teacher roster (usernames included) through
-# these two endpoints — they're meant for classroom's own service-side sync
-# (the doc itself asks for a real service account for this; until one
-# exists, any staff/admin token still works), never for an individual
-# parent or student session. Narrowed to exclude exactly the two roles that
-# should never need "list everyone" access, rather than guessing at the
-# full staff role list the way an allowlist would have to.
-_NO_ROSTER_ACCESS_ROLES = {"parent", "student"}
+# request #24 §C, resolved per §C1-b (the doc's own strictest option, picked
+# once the §D1 service account existed): these two endpoints exist ONLY for
+# classroom's service-side sync — confirmed nothing in this project's own
+# frontend calls either one — so there is no legitimate reason for a
+# regular staff token (teacher, employee, hr, ...) to pull a full-school
+# roster with usernames through them. Originally narrowed to just exclude
+# parent/student (any staff token still worked); tightened here to an
+# allowlist instead: the classroom_sync service account (§D1) by name, plus
+# the admin-tier roles that already have broad legitimate access to
+# everything else in this API.
+_ROSTER_ADMIN_ROLES = {"owner", "manager", "admin", "accountant"}
+_ROSTER_SERVICE_ACCOUNTS = {"classroom_sync"}
 
 
-def _staff_only(user: models.User = Depends(get_current_user)) -> models.User:
-    if user.role in _NO_ROSTER_ACCESS_ROLES:
-        raise HTTPException(status.HTTP_403_FORBIDDEN, detail="Not available to this account")
-    return user
+def _roster_access(user: models.User = Depends(get_current_user)) -> models.User:
+    if user.username in _ROSTER_SERVICE_ACCOUNTS or user.role in _ROSTER_ADMIN_ROLES:
+        return user
+    raise HTTPException(status.HTTP_403_FORBIDDEN, detail="Not available to this account")
 
 _ACTIVE_USERS_BY_SOURCE_ROLE = {
     ("gennis", "student"): directory.active_gennis_students,
@@ -46,7 +49,7 @@ def student_platform_active_users(
     source: str,
     role: str,
     db: Session = Depends(get_db),
-    _: models.User = Depends(_staff_only),
+    _: models.User = Depends(_roster_access),
 ):
     """Everyone in `source` currently active as `role` — see
     app/services/student_directory.py for exactly what "active" means and
@@ -69,7 +72,7 @@ def student_platform_active_users(
 def student_platform_teachers(
     source: str,
     db: Session = Depends(get_db),
-    _: models.User = Depends(_staff_only),
+    _: models.User = Depends(_roster_access),
 ):
     """Every gennis/turon teacher with a bridged management account (i.e.
     ever loginable through student_platform), active or not — request #20
