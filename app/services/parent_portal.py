@@ -12,7 +12,7 @@ from typing import Optional
 
 from sqlalchemy.orm import Session
 
-from app import gennis_v2_models, models
+from app import models
 
 
 def my_id_in_source(db: Session, user: "models.User", source: str) -> Optional[int]:
@@ -59,18 +59,40 @@ def can_view_student(db: Session, current_user: "models.User", source: str, stud
     deliberately excluded even though they can see the same numbers
     elsewhere in the admin panel — this integration channel is scoped to
     the family only, not to "anyone with a valid token".
+
+    Reads the SAME link tables gennis-v2's and turon-v2's own parent admin
+    tools already write to (GennisParentChildLink -> parent_child_link,
+    TuronParentChildLink -> turon_parent_child_v2) rather than a
+    management-v2-only table — those already have real, in-use data;
+    management-v2 briefly had its own separate (and empty) one, see
+    app/models.py's docstrings on both classes for the full story.
     """
     if my_id_in_source(db, current_user, source) == student_id:
         return True
-    return bool(
-        db.query(gennis_v2_models.ParentChildLink.id)
-        .filter(
-            gennis_v2_models.ParentChildLink.parent_user_id == current_user.id,
-            gennis_v2_models.ParentChildLink.source == source,
-            gennis_v2_models.ParentChildLink.child_ref_id == student_id,
+    if source == "gennis":
+        internal_id = (
+            db.query(models.GennisStudent.id).filter(models.GennisStudent.gennis_id == student_id).first()
         )
-        .first()
-    )
+        if not internal_id:
+            return False
+        return bool(
+            db.query(models.GennisParentChildLink.id)
+            .filter(
+                models.GennisParentChildLink.parent_user_id == current_user.id,
+                models.GennisParentChildLink.student_id == internal_id[0],
+            )
+            .first()
+        )
+    if source == "turon":
+        return bool(
+            db.query(models.TuronParentChildLink.id)
+            .filter(
+                models.TuronParentChildLink.parent_user_id == current_user.id,
+                models.TuronParentChildLink.student_user_id == student_id,
+            )
+            .first()
+        )
+    return False
 
 
 def resolve_legacy_turon_student(db: Session, turon_db: Session, management_user_id: int):

@@ -1,12 +1,16 @@
 """Tests for app.services.parent_portal — the access-control rule behind
 the parent portal's attendance/payment endpoints (requests #13/#14): only
 the student themself, or a parent linked to them, may read their record.
+
+can_view_student reads gennis-v2's and turon-v2's own parent-child link
+tables directly (GennisParentChildLink / TuronParentChildLink in
+app/models.py) — not a management-v2-only table (that was tried, then
+removed — see both classes' docstrings for why).
 """
 
 from __future__ import annotations
 
-from app.gennis_v2_models import ParentChildLink
-from app.models import GennisStudent, GennisUserLink, User
+from app.models import GennisParentChildLink, GennisStudent, GennisUserLink, TuronParentChildLink, User
 from app.services.parent_portal import can_view_student, my_id_in_source
 
 
@@ -99,27 +103,63 @@ def test_unknown_source_returns_none():
 
 def test_student_can_view_their_own_turon_record():
     user = make_user(id=99)
-    db = FakeDB(first_results={ParentChildLink.id: None})
+    db = FakeDB(first_results={TuronParentChildLink.id: None})
 
     assert can_view_student(db, user, "turon", 99) is True
 
 
 def test_unrelated_user_cannot_view_a_turon_students_record():
     user = make_user(id=1)
-    db = FakeDB(first_results={ParentChildLink.id: None})
+    db = FakeDB(first_results={TuronParentChildLink.id: None})
 
     assert can_view_student(db, user, "turon", 99) is False
 
 
-def test_linked_parent_can_view_their_childs_record():
+def test_linked_parent_can_view_their_turon_childs_record():
     parent = make_user(id=1)
-    db = FakeDB(first_results={ParentChildLink.id: 123})  # a row id — link exists
+    db = FakeDB(first_results={TuronParentChildLink.id: 123})  # a row id — link exists
 
     assert can_view_student(db, parent, "turon", 5011) is True
 
 
-def test_parent_linked_to_a_different_child_cannot_view_this_one():
+def test_parent_linked_to_a_different_turon_child_cannot_view_this_one():
     parent = make_user(id=1)
-    db = FakeDB(first_results={ParentChildLink.id: None})  # no matching link row
+    db = FakeDB(first_results={TuronParentChildLink.id: None})  # no matching link row
+
+    assert can_view_student(db, parent, "turon", 5011) is False
+
+
+def test_gennis_child_not_found_denies_access_without_querying_the_link_table():
+    # student_id doesn't resolve to any gennis_student at all — can_view_student
+    # must return False outright rather than passing an unresolved id through
+    # to the link-table query.
+    parent = make_user(id=1)
+    db = FakeDB(first_results={GennisStudent.id: None})
+
+    assert can_view_student(db, parent, "gennis", 999999) is False
+
+
+def test_linked_parent_can_view_their_gennis_childs_record():
+    parent = make_user(id=1)
+    # GennisStudent.id resolves the external gennis_id (5011) to the
+    # internal PK (77) the link table actually stores.
+    db = FakeDB(
+        first_results={
+            GennisStudent.id: (77,),
+            GennisParentChildLink.id: 123,
+        }
+    )
+
+    assert can_view_student(db, parent, "gennis", 5011) is True
+
+
+def test_parent_linked_to_a_different_gennis_child_cannot_view_this_one():
+    parent = make_user(id=1)
+    db = FakeDB(
+        first_results={
+            GennisStudent.id: (77,),
+            GennisParentChildLink.id: None,
+        }
+    )
 
     assert can_view_student(db, parent, "gennis", 5011) is False

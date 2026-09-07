@@ -222,63 +222,15 @@ class GennisParentRegistration(BaseV2):
     linked_user_id = Column(BigInteger, nullable=True)   # user.id created for this parent, once approved
 
 
-class ParentChildLink(BaseV2):
-    """Maps a management user with role="parent" to one of their children.
-
-    Lives here (BaseV2/alembic_v2), not in app/models.py's main `Base`,
-    despite covering turon children too: the main `alembic/` track has no
-    tracked migration history in this repo at all (gitignored, zero files
-    ever committed) and isn't run by the deploy pipeline — alembic_v2 is
-    the only migration track actually applied to production on every
-    deploy (see .github/workflows/deploy.yml). A table only the main track
-    knows how to create would need a manual one-off DDL run instead of
-    shipping through the normal PR → merge → deploy flow.
-
-    `child_ref_id` is deliberately the SAME id student_platform already sees
-    when that child logs in themself — gennis_student.gennis_id for a gennis
-    child, this same `user.id` for a turon child (turon has no separate id
-    space, see student_platform.py's login docstring) — not our own
-    internal PKs. That way this table can answer "who are this parent's
-    children" directly in the id space the caller already has, with no
-    translation step, and a mistake here fails obviously (wrong/missing
-    child) rather than silently (right child, wrong id format).
-
-    One row per child, so a parent with several children just gets several
-    rows — there is no cap on how many. No ORM-level relationship to
-    `User` (BaseV2 classes here never declare one — see the module
-    docstring); `parent_user_id` is still a real FK at the DB level.
-
-    No status/active flag: a child leaving the school has no automatic
-    effect on this row (neither GennisStudent nor turon's Student row
-    tracks "left" or a current branch to key off) — a staff-initiated
-    delete is the only way a link ends. A branch TRANSFER needs no
-    handling at all — attendance/payment records are per-group, not
-    filtered by the child's current branch (see
-    app/routers/v1/management/parent_registrations.py's
-    delete_parent_child_link docstring for the full reasoning).
-
-    Table name is `parent_child_link_v2`, not the plain `parent_child_link`
-    every other docstring/comment/commit message in this feature refers to
-    by that shorter name — a table with that exact name already exists in
-    production (created 2026-07-29, 25 real rows, untracked by any
-    migration or code in this repo, schema incompatible with this one:
-    gennis-only, no `source` column). Caught before this migration ever
-    ran anywhere, so renamed rather than colliding. That pre-existing
-    table is left untouched pending its own investigation — see the
-    migration file (alembic_v2/versions/e6f7a8b9c0d1_*.py) for the full
-    story.
-    """
-    __tablename__ = "parent_child_link_v2"
-    __table_args__ = (
-        UniqueConstraint("parent_user_id", "source", "child_ref_id", name="uq_parent_child_link_v2"),
-        Index("ix_pcl_v2_parent_user_id", "parent_user_id"),
-    )
-
-    id             = Column(BigInteger, primary_key=True, autoincrement=True)
-    parent_user_id = Column(BigInteger, nullable=False)   # user.id (FK enforced in the migration, not the ORM)
-    source         = Column(String(20), nullable=False)   # "gennis" | "turon"
-    child_ref_id   = Column(Integer, nullable=False)      # gennis_student.gennis_id, or user.id for turon
-    created_at     = Column(DateTime, server_default=func.now())
+# `class ParentChildLink` / table `parent_child_link_v2` used to live here —
+# removed. turon-v2 and gennis-v2 each already own a real, populated
+# parent-child link table of their own (turon_parent_child_v2 with 8 rows,
+# parent_child_link with 25 rows) — this one was a same-day duplicate built
+# without knowing that, and never got any real writes (0 rows) before the
+# duplication was caught. See app/models.py's GennisParentChildLink /
+# TuronParentChildLink (read-only mappings onto the two real tables) and
+# alembic_v2/versions/<drop migration> for the full story. Don't
+# reintroduce a management-v2-owned parent_child_link_v2 table.
 
 
 class GennisLessonAttendance(BaseV2):
