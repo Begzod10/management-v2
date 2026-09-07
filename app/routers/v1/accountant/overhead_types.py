@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
+from app.dependencies import require_roles
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from pydantic import BaseModel
@@ -16,7 +17,7 @@ class CopyUpdate(BaseModel):
     cost: Optional[int] = None
     changeable: Optional[bool] = None
 
-router = APIRouter(prefix="/overhead-types", tags=["Overhead Types"])
+router = APIRouter(prefix="/overhead-types", tags=["Overhead Types"], dependencies=[Depends(require_roles("owner", "admin", "accountant"))])
 
 
 def _get_or_404(db: Session, overhead_type_id: int) -> OverheadType:

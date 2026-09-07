@@ -1,11 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException
+from app.dependencies import get_current_user
 from sqlalchemy.orm import Session
 from typing import List
 from app.database import get_db
 from app.models import Tag
 from app.schemas import TagCreate, TagOut
 
-router = APIRouter(prefix="/tags", tags=["Tags"])
+router = APIRouter(prefix="/tags", tags=["Tags"], dependencies=[Depends(get_current_user)])
 
 
 @router.post("/", response_model=TagOut, status_code=201)

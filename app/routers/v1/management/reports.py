@@ -34,6 +34,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Query
+from app.dependencies import get_current_user
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -51,7 +52,7 @@ from app.models import (
 from app.schemas_stats import BalanceSheetAssets, BalanceSheetLiabilities, BalanceSheetOut, BalanceSheetSection
 from .statistics import gennis_summary, turon_summary
 
-router = APIRouter(prefix="/reports", tags=["Reports"])
+router = APIRouter(prefix="/reports", tags=["Reports"], dependencies=[Depends(get_current_user)])
 
 
 def _cash_position(db: Session, summary_fn, location_or_branch_id: Optional[int]) -> int:

@@ -1,11 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException
+from app.dependencies import get_current_user
 from sqlalchemy.orm import Session
 from typing import List
 from app.database import get_db
 from app.models import Branch
 from app.schemas import BranchCreate, BranchOut
 
-router = APIRouter(prefix="/branches", tags=["Branches"])
+router = APIRouter(prefix="/branches", tags=["Branches"], dependencies=[Depends(get_current_user)])
 
 
 @router.post("/", response_model=BranchOut, status_code=201)

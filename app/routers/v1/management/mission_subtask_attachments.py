@@ -2,6 +2,7 @@ import os
 import uuid
 import aiofiles
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+from app.dependencies import get_current_user
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from app.database import get_db, get_gennis_write_db, get_turon_write_db
@@ -15,8 +16,7 @@ from app.services.telegram import tpl_attachment_added
 
 router = APIRouter(
     prefix="/missions/{mission_id}/subtasks/{subtask_id}/attachments",
-    tags=["Mission Subtask Attachments"],
-)
+    tags=["Mission Subtask Attachments"], dependencies=[Depends(get_current_user)])
 
 UPLOAD_DIR = "uploads/mission_subtask_attachments"
 os.makedirs(UPLOAD_DIR, exist_ok=True)

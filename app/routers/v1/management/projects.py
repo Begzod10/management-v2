@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
+from app.dependencies import get_current_user
 from sqlalchemy.orm import Session, joinedload, aliased
 from typing import List, Optional
 from app.database import get_db
@@ -6,7 +7,7 @@ from app.dependencies import promote_to_manager
 from app.models import Project, ProjectMember, User
 from app.schemas import ProjectCreate, ProjectUpdate, ProjectOut, ProjectMemberAdd, ProjectMemberOut
 
-router = APIRouter(prefix="/projects", tags=["Projects"])
+router = APIRouter(prefix="/projects", tags=["Projects"], dependencies=[Depends(get_current_user)])
 
 
 def _get_project_or_404(db: Session, project_id: int) -> Project:

@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
+from app.dependencies import get_current_user
 from sqlalchemy.orm import Session
 from typing import List
 
@@ -6,7 +7,7 @@ from app.database import get_db
 from app.models import SystemModel
 from app.schemas import SystemModelCreate, SystemModelUpdate, SystemModelOut
 
-router = APIRouter(prefix="/system-models", tags=["System Models"])
+router = APIRouter(prefix="/system-models", tags=["System Models"], dependencies=[Depends(get_current_user)])
 
 
 @router.post("/", response_model=SystemModelOut, status_code=201)

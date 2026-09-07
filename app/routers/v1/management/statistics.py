@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, Query
+from app.dependencies import get_current_user
 from sqlalchemy.orm import Session
 from sqlalchemy import func, extract, desc
 from typing import Optional, List
@@ -226,7 +227,7 @@ def _aggregate_sections(rows, rules):
         })
     return sorted(result, key=lambda x: x["total_requests"], reverse=True)
 
-router = APIRouter(prefix="/statistics", tags=["Statistics"])
+router = APIRouter(prefix="/statistics", tags=["Statistics"], dependencies=[Depends(get_current_user)])
 
 
 # ─── API Usage ────────────────────────────────────────────────────────────────

@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
+from app.dependencies import get_current_user
 from sqlalchemy.orm import Session, joinedload
 from typing import List, Optional
 from app.database import get_db
@@ -6,7 +7,7 @@ from app.dependencies import promote_to_manager
 from app.models import Section, SectionMember, User
 from app.schemas import SectionCreate, SectionUpdate, SectionOut, SectionMemberAdd, SectionMemberOut, UserOut
 
-router = APIRouter(prefix="/sections", tags=["Sections"])
+router = APIRouter(prefix="/sections", tags=["Sections"], dependencies=[Depends(get_current_user)])
 
 
 def _get_section_or_404(db: Session, section_id: int) -> Section:

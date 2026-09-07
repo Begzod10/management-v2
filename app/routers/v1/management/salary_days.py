@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
+from app.dependencies import get_current_user
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 from typing import List
@@ -6,7 +7,7 @@ from app.database import get_db
 from app.models import SalaryMonth, SalaryDay
 from app.schemas import SalaryDayCreate, SalaryDayUpdate, SalaryDayOut
 
-router = APIRouter(prefix="/salary-days", tags=["Salary Days"])
+router = APIRouter(prefix="/salary-days", tags=["Salary Days"], dependencies=[Depends(get_current_user)])
 
 
 def _recalculate_month(month: SalaryMonth, db: Session):

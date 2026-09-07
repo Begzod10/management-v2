@@ -22,6 +22,8 @@ from collections import defaultdict
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, Query, HTTPException
+from app.dependencies import get_current_user, require_roles
+from app.models import User
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_
 
@@ -46,7 +48,13 @@ from app.schemas_stats import (
     GennisOverheadDetailOut,
 )
 
-router = APIRouter(prefix="/gennis", tags=["Gennis Detail"])
+router = APIRouter(prefix="/gennis", tags=["Gennis Detail"], dependencies=[Depends(get_current_user)])
+
+# /debtors, /salaries, /overhead below carry real financial figures (debts,
+# salaries, overhead spend) — admin-only, on top of the router-wide
+# get_current_user every other endpoint here gets. Matches the ADMIN_ROLES
+# convention already used in users.py / parent_registrations.py.
+ADMIN_ROLES = ("owner", "manager")
 
 
 # ── Branches ──────────────────────────────────────────────────────────────────
@@ -243,6 +251,7 @@ def gennis_debtors(
     month: int = Query(..., ge=1, le=12),
     year: int = Query(..., ge=2000),
     db: Session = Depends(get_db),
+    _: User = Depends(require_roles(*ADMIN_ROLES)),
 ):
     """Same shape as before, reading gennis-v2's own attendance-history
     table — which carries student_name/group_name denormalized directly,
@@ -357,6 +366,7 @@ def gennis_salaries(
     year: int = Query(..., ge=2000),
     type_salary: str = Query(..., pattern="^(teacher|assistent|staff)$"),
     db: Session = Depends(get_db),
+    _: User = Depends(require_roles(*ADMIN_ROLES)),
 ):
     """gennis-v2's monthly salary tables already carry black_salary/debt/
     fine/remaining_salary/is_deleted pre-computed per row — no separate
@@ -494,6 +504,7 @@ def gennis_overhead(
     month: int = Query(..., ge=1, le=12),
     year: int = Query(..., ge=2000),
     db: Session = Depends(get_db),
+    _: User = Depends(require_roles(*ADMIN_ROLES)),
 ):
     month_date_obj = datetime.strptime(f"{year}-{month:02d}", "%Y-%m")
 
