@@ -151,9 +151,14 @@ def _parent_children(db: Session, parent_user_id: int) -> list[dict]:
     19281 -> student_user_id 17395; 675 belongs to an unrelated account,
     "ABDULLOH12"). Most likely stale test data from before this endpoint
     was switched onto gennis-v2's/turon-v2's own real link tables (see
-    GennisParentChildLink/TuronParentChildLink's docstrings) — left as-is,
-    with `username` added below per that same doc's own fallback ask
-    ("agar username qo'shilsa, bu muammo butunlay yopiladi").
+    GennisParentChildLink/TuronParentChildLink's docstrings) — left as-is.
+
+    `login_id` (request #24 §A) is the bridged management `user.id` — the
+    same value embedded in the access_token's own `user_id` claim were this
+    child to log in themself, and for gennis specifically a DIFFERENT
+    number than `id` (which is their student/profile id, not their
+    account's management id). See student_directory.py's module docstring
+    for the full reasoning.
 
     Reads gennis-v2's and turon-v2's own parent-child link tables directly
     (GennisParentChildLink / TuronParentChildLink in app/models.py) — the
@@ -193,11 +198,12 @@ def _parent_children(db: Session, parent_user_id: int) -> list[dict]:
             .filter(models.GennisStudent.id.in_(gennis_internal_ids))
             .all()
         }
-    # request #21: username closes the id-space ambiguity completely,
-    # regardless of which id a caller expects — resolved through the same
-    # gennis_user_link bridge as the roster endpoints (request #20), not
-    # gennis_student's own fields (it has no username of its own).
-    gennis_usernames = student_directory.gennis_username_map(
+    # request #21/#24: username (and now login_id) close the id-space
+    # ambiguity completely, regardless of which id a caller expects —
+    # resolved through the same gennis_user_link bridge as the roster
+    # endpoints (request #20), not gennis_student's own fields (it has no
+    # username or management id of its own).
+    gennis_identity = student_directory.gennis_login_id_map(
         db, [user_id for (_gid, user_id, _n, _s) in gennis_rows.values() if user_id]
     )
 
@@ -219,10 +225,12 @@ def _parent_children(db: Session, parent_user_id: int) -> list[dict]:
             # skip rather than show an id student_platform can't use.
             continue
         gennis_id, gennis_user_id, name, surname = resolved
+        login_id, username = gennis_identity.get(gennis_user_id, (None, None))
         children.append({
             "id": gennis_id,
+            "login_id": login_id,
             "source": "gennis",
-            "username": gennis_usernames.get(gennis_user_id),
+            "username": username,
             "name": name or "",
             "surname": surname or "",
         })
@@ -230,6 +238,9 @@ def _parent_children(db: Session, parent_user_id: int) -> list[dict]:
         username, name, surname = turon_users.get(link.student_user_id, (None, "", ""))
         children.append({
             "id": link.student_user_id,
+            # turon has no separate id space — login_id is always the same
+            # value as `id` (see student_directory.py's module docstring).
+            "login_id": link.student_user_id,
             "source": "turon",
             "username": username,
             "name": name,

@@ -1,12 +1,12 @@
 """Tests for app.services.student_directory — request #20's active-users
-diff feed and teachers directory.
+diff feed and teachers directory, plus request #24 §A's `login_id` field.
 
 Same FakeDB/FakeQuery convention as test_parent_children.py: `.join()`,
 `.outerjoin()`, `.distinct()` and `.filter()` are no-ops (the fake can't
 verify a SQL WHERE/JOIN condition), `.all()`/`.first()` return canned rows
 keyed off the query's first selected column/model. These tests exercise the
 Python-level shaping each function does with what the DB hands back
-(id/username selection, the null-username exclusion, the is_active
+(id/login_id/username selection, the null-username exclusion, the is_active
 combination) — not the SQL filter conditions themselves, which is the same
 limitation test_parent_children.py already accepted.
 """
@@ -58,13 +58,15 @@ def _row(**kwargs):
 
 # ── active_gennis_students ──────────────────────────────────────────────────
 
-def test_active_gennis_students_returns_id_and_username():
-    row = _row(gennis_id=5011, username="Anora2012")
+def test_active_gennis_students_returns_id_login_id_and_username():
+    # id = the student/profile id (gennis_id); login_id = the bridged
+    # management user.id — deliberately different values (request #24 §A).
+    row = _row(gennis_id=17395, id=675, username="Anora2012")
     db = FakeDB(all_results={models.GennisStudent.gennis_id: [row]})
 
     result = student_directory.active_gennis_students(db)
 
-    assert result == [{"id": 5011, "username": "Anora2012"}]
+    assert result == [{"id": 17395, "login_id": 675, "username": "Anora2012"}]
 
 
 def test_active_gennis_students_empty_when_none_active():
@@ -75,23 +77,24 @@ def test_active_gennis_students_empty_when_none_active():
 # ── active_gennis_teachers ──────────────────────────────────────────────────
 
 def test_active_gennis_teachers_uses_gennis_user_link_id_not_teacher_gennis_id():
-    row = _row(gennis_user_id=168, username="ali_teach")
+    row = _row(gennis_user_id=168, id=675, username="ali_teach")
     db = FakeDB(all_results={models.GennisUserLink.gennis_user_id: [row]})
 
     result = student_directory.active_gennis_teachers(db)
 
-    assert result == [{"id": 168, "username": "ali_teach"}]
+    assert result == [{"id": 168, "login_id": 675, "username": "ali_teach"}]
 
 
 # ── active_turon_students / active_turon_teachers ───────────────────────────
 
 def test_active_turon_students_uses_user_id_directly():
+    # turon has no separate id space — login_id always equals id.
     row = _row(id=872, username="zilola_t")
     db = FakeDB(all_results={models.User.id: [row]})
 
     result = student_directory.active_turon_students(db)
 
-    assert result == [{"id": 872, "username": "zilola_t"}]
+    assert result == [{"id": 872, "login_id": 872, "username": "zilola_t"}]
 
 
 def test_active_turon_teachers_uses_user_id_directly():
@@ -100,7 +103,7 @@ def test_active_turon_teachers_uses_user_id_directly():
 
     result = student_directory.active_turon_teachers(db)
 
-    assert result == [{"id": 44, "username": "teach_turon"}]
+    assert result == [{"id": 44, "login_id": 44, "username": "teach_turon"}]
 
 
 # ── gennis_username_map ─────────────────────────────────────────────────────
@@ -124,11 +127,27 @@ def test_gennis_username_map_missing_id_is_absent_not_empty_string():
     assert student_directory.gennis_username_map(db, [9999]) == {}
 
 
+# ── gennis_login_id_map ──────────────────────────────────────────────────────
+
+def test_gennis_login_id_map_empty_ids_short_circuits_without_querying():
+    db = FakeDB()
+    assert student_directory.gennis_login_id_map(db, []) == {}
+
+
+def test_gennis_login_id_map_resolves_login_id_and_username_together():
+    row = _row(gennis_user_id=777, id=675, username="Anora2012")
+    db = FakeDB(all_results={models.GennisUserLink.gennis_user_id: [row]})
+
+    result = student_directory.gennis_login_id_map(db, [777])
+
+    assert result == {777: (675, "Anora2012")}
+
+
 # ── gennis_teachers_directory ───────────────────────────────────────────────
 
 def test_gennis_teachers_directory_active_when_all_three_flags_agree():
     row = _row(
-        gennis_user_id=168, username="ali_teach", name="Ali", surname="Valiyev",
+        gennis_user_id=168, id=675, username="ali_teach", name="Ali", surname="Valiyev",
         is_active=True, deleted=False, synced_active=True,
     )
     db = FakeDB(all_results={models.GennisUserLink.gennis_user_id: [row]})
@@ -136,14 +155,14 @@ def test_gennis_teachers_directory_active_when_all_three_flags_agree():
     result = student_directory.gennis_teachers_directory(db)
 
     assert result == [{
-        "id": 168, "username": "ali_teach", "name": "Ali", "surname": "Valiyev",
+        "id": 168, "login_id": 675, "username": "ali_teach", "name": "Ali", "surname": "Valiyev",
         "is_active": True,
     }]
 
 
 def test_gennis_teachers_directory_inactive_when_account_deleted_even_if_synced_active():
     row = _row(
-        gennis_user_id=168, username="ali_teach", name="Ali", surname="Valiyev",
+        gennis_user_id=168, id=675, username="ali_teach", name="Ali", surname="Valiyev",
         is_active=True, deleted=True, synced_active=True,
     )
     db = FakeDB(all_results={models.GennisUserLink.gennis_user_id: [row]})
@@ -155,7 +174,7 @@ def test_gennis_teachers_directory_inactive_when_account_deleted_even_if_synced_
 
 def test_gennis_teachers_directory_inactive_when_synced_inactive_even_if_account_active():
     row = _row(
-        gennis_user_id=168, username="ali_teach", name="Ali", surname="Valiyev",
+        gennis_user_id=168, id=675, username="ali_teach", name="Ali", surname="Valiyev",
         is_active=True, deleted=False, synced_active=False,
     )
     db = FakeDB(all_results={models.GennisUserLink.gennis_user_id: [row]})
@@ -177,7 +196,7 @@ def test_turon_teachers_directory_active_when_all_flags_agree():
     result = student_directory.turon_teachers_directory(db)
 
     assert result == [{
-        "id": 44, "username": "teach_turon", "name": "Bek", "surname": "Rustamov",
+        "id": 44, "login_id": 44, "username": "teach_turon", "name": "Bek", "surname": "Rustamov",
         "is_active": True,
     }]
 

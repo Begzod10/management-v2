@@ -28,6 +28,14 @@ column (gennis_teacher.username, gennis_staff.username) — those mirror old
 gennis and can drift from the bridged management account's actual login
 name (renamed via admin_change_username, or never touched at all), which
 would hand the caller a key that can't match the real account.
+
+`login_id` (request doc #24 §A): the bridged management `user.id` — the
+SAME value embedded in the access_token's own `user_id` claim at /login,
+distinct from `id` for a gennis account (`id` there is the STUDENT/profile
+id, gennis_student.gennis_id or the teacher's gennis_user_id — see each
+function's own docstring). For turon, `login_id` and `id` are always the
+same value (turon has no separate id space at all), included anyway so a
+caller doesn't have to know that per-source difference itself.
 """
 from __future__ import annotations
 
@@ -42,7 +50,7 @@ def active_gennis_students(db: Session) -> list[dict]:
     in. `id` is the STUDENT id (gennis_student.gennis_id), matching what
     /login and the group-roster endpoints already hand out for a student."""
     rows = (
-        db.query(models.GennisStudent.gennis_id, models.User.username)
+        db.query(models.GennisStudent.gennis_id, models.User.id, models.User.username)
         .join(
             models.gennis_student_group_table,
             models.gennis_student_group_table.c.student_id == models.GennisStudent.id,
@@ -66,7 +74,7 @@ def active_gennis_students(db: Session) -> list[dict]:
         .distinct()
         .all()
     )
-    return [{"id": r.gennis_id, "username": r.username} for r in rows]
+    return [{"id": r.gennis_id, "login_id": r.id, "username": r.username} for r in rows]
 
 
 def active_gennis_teachers(db: Session) -> list[dict]:
@@ -74,7 +82,7 @@ def active_gennis_teachers(db: Session) -> list[dict]:
     gennis teacher back as their own `id` (NOT gennis_teacher.gennis_id —
     see student_platform_login's docstring on the two teacher ids)."""
     rows = (
-        db.query(models.GennisUserLink.gennis_user_id, models.User.username)
+        db.query(models.GennisUserLink.gennis_user_id, models.User.id, models.User.username)
         .join(
             models.GennisTeacherSync,
             models.GennisTeacherSync.user_gennis_id == models.GennisUserLink.gennis_user_id,
@@ -89,7 +97,7 @@ def active_gennis_teachers(db: Session) -> list[dict]:
         .distinct()
         .all()
     )
-    return [{"id": r.gennis_user_id, "username": r.username} for r in rows]
+    return [{"id": r.gennis_user_id, "login_id": r.id, "username": r.username} for r in rows]
 
 
 def active_turon_students(db: Session) -> list[dict]:
@@ -105,7 +113,7 @@ def active_turon_students(db: Session) -> list[dict]:
         )
         .all()
     )
-    return [{"id": r.id, "username": r.username} for r in rows]
+    return [{"id": r.id, "login_id": r.id, "username": r.username} for r in rows]
 
 
 def active_turon_teachers(db: Session) -> list[dict]:
@@ -120,7 +128,7 @@ def active_turon_teachers(db: Session) -> list[dict]:
         )
         .all()
     )
-    return [{"id": r.id, "username": r.username} for r in rows]
+    return [{"id": r.id, "login_id": r.id, "username": r.username} for r in rows]
 
 
 def gennis_username_map(db: Session, gennis_user_ids: list[int]) -> dict[int, str]:
@@ -145,6 +153,25 @@ def gennis_username_map(db: Session, gennis_user_ids: list[int]) -> dict[int, st
     return {r.gennis_user_id: r.username for r in rows}
 
 
+def gennis_login_id_map(db: Session, gennis_user_ids: list[int]) -> dict[int, tuple[int, str]]:
+    """Like gennis_username_map, but also carries the bridged management
+    `user.id` (request doc #24 §A's `login_id`) — used where a caller needs
+    both, e.g. _parent_children (student_platform.py), rather than two
+    separate round trips through the same join."""
+    if not gennis_user_ids:
+        return {}
+    rows = (
+        db.query(models.GennisUserLink.gennis_user_id, models.User.id, models.User.username)
+        .join(models.User, models.User.id == models.GennisUserLink.management_user_id)
+        .filter(
+            models.GennisUserLink.gennis_user_id.in_(gennis_user_ids),
+            models.User.username.isnot(None),
+        )
+        .all()
+    )
+    return {r.gennis_user_id: (r.id, r.username) for r in rows}
+
+
 def gennis_teachers_directory(db: Session) -> list[dict]:
     """Every gennis teacher with a bridged management account (i.e. ever
     loginable through student_platform), active or not — unlike
@@ -153,6 +180,7 @@ def gennis_teachers_directory(db: Session) -> list[dict]:
     rows = (
         db.query(
             models.GennisUserLink.gennis_user_id,
+            models.User.id,
             models.User.username,
             models.User.name,
             models.User.surname,
@@ -171,6 +199,7 @@ def gennis_teachers_directory(db: Session) -> list[dict]:
     return [
         {
             "id": r.gennis_user_id,
+            "login_id": r.id,
             "username": r.username,
             "name": r.name or "",
             "surname": r.surname or "",
@@ -198,6 +227,7 @@ def turon_teachers_directory(db: Session) -> list[dict]:
     return [
         {
             "id": r.id,
+            "login_id": r.id,
             "username": r.username,
             "name": r.name or "",
             "surname": r.surname or "",
