@@ -392,8 +392,9 @@ def student_platform_login(body: StudentPlatformLoginRequest, db: Session = Depe
     # check exists to catch a teacher/student account with no sync record,
     # which says nothing about whether a parent can log in.
     #
-    # Gated on `user.role` (the base column approve_registration sets, and
-    # the only thing that means "this account IS a parent") rather than the
+    # Gated on `user.role` (the base column set when a parent account is
+    # created, and the only thing that means "this account IS a parent")
+    # rather than the
     # derived `role` below: that derived value gives "teacher"/"student"
     # priority over the base role whenever extra_roles carries one, so
     # gating on it here would let a parent account that ever picked up an
