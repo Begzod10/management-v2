@@ -2,6 +2,7 @@
 Combined cross-system views (Gennis + Turon).
 """
 from fastapi import APIRouter, Depends, Query
+from app.dependencies import get_current_user
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
 from typing import Optional
@@ -10,7 +11,7 @@ from app.database import get_gennis_write_db, get_turon_write_db
 from app.external_models import gennis as G
 from app.external_models import turon as T
 
-router = APIRouter(prefix="/combined", tags=["Combined"])
+router = APIRouter(prefix="/combined", tags=["Combined"], dependencies=[Depends(get_current_user)])
 
 
 @router.get("/directors")

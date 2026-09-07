@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
+from app.dependencies import get_current_user
 from sqlalchemy.orm import Session, joinedload, selectinload
 from sqlalchemy import or_, func
 from typing import List, Optional
@@ -167,7 +168,7 @@ class ExternalMissionOut(BaseModel):
     is_recurring: bool = False
     created_at: Optional[str] = None
 
-router = APIRouter(prefix="/missions", tags=["Missions"])
+router = APIRouter(prefix="/missions", tags=["Missions"], dependencies=[Depends(get_current_user)])
 
 
 def _log_history(

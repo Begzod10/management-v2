@@ -22,6 +22,7 @@ from datetime import date, datetime
 from typing import Optional, Literal, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from app.dependencies import get_current_user
 from sqlalchemy.orm import Session
 
 from app.database import get_gennis_db, get_turon_db
@@ -41,7 +42,7 @@ from app.external_models.turon import (
 )
 
 
-router = APIRouter(prefix="/overhead-type-logs", tags=["Overhead Type Logs"])
+router = APIRouter(prefix="/overhead-type-logs", tags=["Overhead Type Logs"], dependencies=[Depends(get_current_user)])
 
 StatusFilter = Literal["all", "paid", "unpaid"]
 SourceFilter = Literal["gennis", "turon"]

@@ -2,6 +2,7 @@ from datetime import date as dt_date
 from typing import List, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from app.dependencies import get_current_user
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -29,7 +30,7 @@ from app.schemas import (
     BranchLoanUpdate,
 )
 
-router = APIRouter(prefix="/branch-loans", tags=["Branch Loans"])
+router = APIRouter(prefix="/branch-loans", tags=["Branch Loans"], dependencies=[Depends(get_current_user)])
 
 ExternalSource = Literal["gennis", "turon"]
 

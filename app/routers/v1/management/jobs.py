@@ -1,11 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException
+from app.dependencies import get_current_user
 from sqlalchemy.orm import Session
 from typing import List
 from app.database import get_db
 from app.models import Job
 from app.schemas import JobCreate, JobUpdate, JobOut
 
-router = APIRouter(prefix="/jobs", tags=["Jobs"])
+router = APIRouter(prefix="/jobs", tags=["Jobs"], dependencies=[Depends(get_current_user)])
 
 
 @router.post("/", response_model=JobOut, status_code=201)

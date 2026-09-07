@@ -11,7 +11,7 @@ from sqlalchemy.orm import joinedload
 from app.models import User, Section, Project, ProjectMember, SectionMember, SalaryMonth, GennisUserLink, TuronUserLink
 from app.schemas import UserCreate, UserUpdate, UserOut, UserProfileOut, UserProjectOut, UserSectionOut
 from app.core.security import get_password_hash
-from app.dependencies import require_roles
+from app.dependencies import get_current_user, require_roles
 
 router = APIRouter(prefix="/users", tags=["Users"])
 
@@ -34,7 +34,11 @@ class AdminUsernameChange(BaseModel):
 
 
 @router.post("/", response_model=UserOut, status_code=201)
-def create_user(data: UserCreate, db: Session = Depends(get_db)):
+def create_user(
+    data: UserCreate,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_roles(*ADMIN_ROLES)),
+):
     payload = data.model_dump()
     if not payload.get("job_id"):
         payload["job_id"] = None
@@ -63,6 +67,7 @@ def list_users(
         ),
     ),
     db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
 ):
     q = db.query(User).filter(User.deleted == deleted)
     if role:
@@ -85,6 +90,7 @@ def list_staff_users(
     offset: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),
     db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
 ):
     """Paginated listing behind Staff.tsx's 'Xodimlar' / 'Volontyorlar' tabs —
     deliberately NOT `GET /users/` above, which every task/project picker
@@ -116,7 +122,10 @@ def list_staff_users(
 
 
 @router.get("/unassigned", response_model=List[UserOut])
-def list_unassigned_users(db: Session = Depends(get_db)):
+def list_unassigned_users(
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
     """Task-creation dropdown's 'Bo'limsiz xodimlar' bucket. `User` is the
     identity table for the whole system (gennis/turon/task-management all
     share it), so this must exclude gennis/turon accounts — otherwise this
@@ -156,7 +165,10 @@ def list_unassigned_users(db: Session = Depends(get_db)):
 
 
 @router.get("/project-managers", response_model=List[UserOut])
-def list_project_managers(db: Session = Depends(get_db)):
+def list_project_managers(
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
     return (
         db.query(User)
         .join(Project, Project.manager_id == User.id)
@@ -167,7 +179,10 @@ def list_project_managers(db: Session = Depends(get_db)):
 
 
 @router.get("/section-leaders", response_model=List[UserOut])
-def list_section_leaders(db: Session = Depends(get_db)):
+def list_section_leaders(
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
     return (
         db.query(User)
         .join(Section, Section.leader_id == User.id)
@@ -178,7 +193,11 @@ def list_section_leaders(db: Session = Depends(get_db)):
 
 
 @router.get("/{user_id}", response_model=UserProfileOut)
-def get_user(user_id: int, db: Session = Depends(get_db)):
+def get_user(
+    user_id: int,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
     user = db.query(User).filter(User.id == user_id, User.deleted == False).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
@@ -353,7 +372,16 @@ def admin_change_username(
 
 
 @router.patch("/{user_id}", response_model=UserOut)
-def update_user(user_id: int, data: UserUpdate, db: Session = Depends(get_db)):
+def update_user(
+    user_id: int,
+    data: UserUpdate,
+    db: Session = Depends(get_db),
+    # Arbitrary-field update — includes `role`, so this is a privilege-
+    # escalation surface (set your own account's role to "owner") if left
+    # open to any authenticated user, not just any auth at all. Admin-only,
+    # matching /email and /username right above.
+    _: User = Depends(require_roles(*ADMIN_ROLES)),
+):
     user = db.query(User).filter(User.id == user_id, User.deleted == False).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
@@ -365,7 +393,11 @@ def update_user(user_id: int, data: UserUpdate, db: Session = Depends(get_db)):
 
 
 @router.delete("/{user_id}", status_code=204)
-def delete_user(user_id: int, db: Session = Depends(get_db)):
+def delete_user(
+    user_id: int,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_roles(*ADMIN_ROLES)),
+):
     user = db.query(User).filter(User.id == user_id, User.deleted == False).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")

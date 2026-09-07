@@ -27,6 +27,7 @@ from datetime import date, datetime
 from typing import List, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from app.dependencies import get_current_user
 from pydantic import BaseModel
 from sqlalchemy import case, extract, func, literal, or_, union_all
 from sqlalchemy.orm import Session
@@ -36,7 +37,7 @@ from app.external_models import gennis as G
 from app.external_models import turon as T
 
 
-router = APIRouter(prefix="/accountant", tags=["Accountant"])
+router = APIRouter(prefix="/accountant", tags=["Accountant"], dependencies=[Depends(get_current_user)])
 
 
 # ── Response shape ────────────────────────────────────────────────────────────

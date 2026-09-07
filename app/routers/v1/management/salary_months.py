@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
+from app.dependencies import get_current_user
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from datetime import date
@@ -6,7 +7,7 @@ from app.database import get_db
 from app.models import SalaryMonth
 from app.schemas import SalaryMonthCreate, SalaryMonthUpdate, SalaryMonthOut
 
-router = APIRouter(prefix="/salary-months", tags=["Salary Months"])
+router = APIRouter(prefix="/salary-months", tags=["Salary Months"], dependencies=[Depends(get_current_user)])
 
 
 @router.post("/", response_model=SalaryMonthOut, status_code=201)

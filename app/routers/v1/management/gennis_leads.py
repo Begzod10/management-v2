@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
+from app.dependencies import get_current_user
 from sqlalchemy.orm import Session
 from typing import List, Optional
 
@@ -6,7 +7,7 @@ from app.database import get_db
 from app.models import GennisLead
 from app.schemas import GennisLeadCreate, GennisLeadUpdate, GennisLeadOut
 
-router = APIRouter(prefix="/gennis-leads", tags=["Gennis Leads"])
+router = APIRouter(prefix="/gennis-leads", tags=["Gennis Leads"], dependencies=[Depends(get_current_user)])
 
 
 @router.get("/", response_model=List[GennisLeadOut])

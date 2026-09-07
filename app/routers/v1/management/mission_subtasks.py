@@ -1,5 +1,6 @@
 from datetime import date
 from fastapi import APIRouter, Depends, HTTPException
+from app.dependencies import get_current_user
 from sqlalchemy import func
 from sqlalchemy.orm import Session, selectinload
 from typing import List, Optional
@@ -62,7 +63,7 @@ def _collect_counts(db: Session, subtask_ids: List[int]) -> dict[int, dict[str, 
 
     return counts
 
-router = APIRouter(prefix="/missions/{mission_id}/subtasks", tags=["Mission Subtasks"])
+router = APIRouter(prefix="/missions/{mission_id}/subtasks", tags=["Mission Subtasks"], dependencies=[Depends(get_current_user)])
 
 
 def _get_mission(db: Session, mission_id: int) -> Mission:

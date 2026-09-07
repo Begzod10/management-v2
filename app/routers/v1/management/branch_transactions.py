@@ -12,6 +12,7 @@ Endpoints:
 from typing import List, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from app.dependencies import get_current_user
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -30,7 +31,7 @@ from app.external_models.turon import (
     TuronCustomUser,
 )
 
-router = APIRouter(prefix="/branch-transactions", tags=["Branch Transactions"])
+router = APIRouter(prefix="/branch-transactions", tags=["Branch Transactions"], dependencies=[Depends(get_current_user)])
 
 Source = Literal["gennis", "turon"]
 

@@ -25,6 +25,7 @@ from collections import defaultdict
 from datetime import datetime, date
 
 from fastapi import APIRouter, Depends, Query
+from app.dependencies import get_current_user, require_roles
 from sqlalchemy.orm import Session
 from sqlalchemy import func, extract, exists, and_, or_, case, select
 
@@ -59,7 +60,13 @@ from app.schemas_stats import (
     TuronEmployerSalariesOut, TuronEncashmentOut,
 )
 
-router = APIRouter(prefix="/turon", tags=["Turon Detail"])
+router = APIRouter(prefix="/turon", tags=["Turon Detail"], dependencies=[Depends(get_current_user)])
+
+# /teacher-salaries, /employer-salaries, /encashment carry real financial
+# figures — admin-only, on top of the router-wide get_current_user every
+# other endpoint here gets. Mirrors gennis/detail.py's own /debtors,
+# /salaries, /overhead treatment.
+ADMIN_ROLES = ("owner", "manager")
 
 
 # ── Branches ──────────────────────────────────────────────────────────────────
@@ -385,6 +392,7 @@ def turon_teacher_salaries(
     month: int = Query(..., ge=1, le=12),
     year: int = Query(..., ge=2000),
     db: Session = Depends(get_db),
+    _: User = Depends(require_roles(*ADMIN_ROLES)),
 ):
     """
     Per-teacher salary breakdown with cash/bank/click split.
@@ -468,6 +476,7 @@ def turon_employer_salaries(
     month: int = Query(..., ge=1, le=12),
     year: int = Query(..., ge=2000),
     db: Session = Depends(get_db),
+    _: User = Depends(require_roles(*ADMIN_ROLES)),
 ):
     """
     Per-staff salary breakdown with cash/bank/click split.
@@ -541,6 +550,7 @@ def turon_encashment(
     month: int = Query(..., ge=1, le=12),
     year: int = Query(..., ge=2000),
     db: Session = Depends(get_db),
+    _: User = Depends(require_roles(*ADMIN_ROLES)),
 ):
     """
     Full encashment report broken down by payment type.
