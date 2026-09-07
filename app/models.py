@@ -1866,6 +1866,47 @@ class TuronUserLink(Base):
     user = relationship("User", foreign_keys=[management_user_id])
 
 
+class GennisParentChildLink(Base):
+    """Read-only mapping onto `parent_child_link` -- a table gennis-v2 owns
+    and writes to (its own app/models/parent_child_link.py), not a table
+    management-v2 created. Declared here so the parent-portal integration
+    (student_platform_login, parent_portal.py) can read the SAME 25+ real
+    parent-child links gennis-v2's own admin/self-service UI already
+    manages, instead of a separate, empty table management-v2 briefly
+    maintained on its own (see the migration that drops parent_child_link_v2
+    for the full story). `student_id` is gennis_student's INTERNAL id
+    (verified against production: this is what gennis-v2's own model uses),
+    not the external gennis_id student_platform hands out -- callers must
+    resolve through GennisStudent first, same as every other gennis-side
+    lookup in this codebase.
+
+    management-v2 only ever INSERTs here on behalf of staff using its own
+    admin tools (parent_registrations.py) -- it never touches gennis-v2's
+    own `gennis_parent_registration`-driven self-service flow, and does not
+    read or duplicate that flow's logic.
+    """
+    __tablename__ = "parent_child_link"
+
+    id             = Column(BigInteger, primary_key=True, index=True)
+    parent_user_id = Column(BigInteger, ForeignKey("user.id"), nullable=False)
+    student_id     = Column(Integer, nullable=False)  # gennis_student.id (internal PK)
+    created_at     = Column(DateTime, server_default=func.now())
+
+
+class TuronParentChildLink(Base):
+    """Read-only mapping onto `turon_parent_child_v2` -- turon-v2's own
+    parent-child link table (its app/models/parent.py::TuronParentChild),
+    not one management-v2 created. See GennisParentChildLink's docstring
+    above for the full reasoning; same idea, turon side. `student_user_id`
+    is the shared `user.id` directly -- turon has no separate id space."""
+    __tablename__ = "turon_parent_child_v2"
+
+    id               = Column(BigInteger, primary_key=True, index=True)
+    parent_user_id   = Column(BigInteger, ForeignKey("user.id"), nullable=False)
+    student_user_id  = Column(BigInteger, ForeignKey("user.id"), nullable=False)
+    created_at       = Column(DateTime, server_default=func.now())
+
+
 class TuronBranch(Base):
     __tablename__ = "turon_branch"
 
