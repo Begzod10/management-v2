@@ -58,6 +58,7 @@ from app.database import get_db
 from app.dependencies import get_current_user
 from app.mobile.auth import _verify_external
 from app.services import student_directory
+from app.services.user_lookup import find_user_by_username_or_email
 
 router = APIRouter(prefix="/integrations/student-platform", tags=["Integrations"])
 
@@ -395,14 +396,7 @@ def _flows_for_student_turon(db: Session, user_id: int) -> list[dict]:
 @router.post("/login")
 def student_platform_login(body: StudentPlatformLoginRequest, db: Session = Depends(get_db)):
     """Authenticate and answer in old gennis's /base/login shape."""
-    user = (
-        db.query(models.User)
-        .filter(
-            or_(models.User.username == body.username, models.User.email == body.username),
-            models.User.deleted == False,  # noqa: E712
-        )
-        .first()
-    )
+    user = find_user_by_username_or_email(db, body.username, models.User.deleted == False)  # noqa: E712
     if not user or not _verify_external(body.password, user.hashed_password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

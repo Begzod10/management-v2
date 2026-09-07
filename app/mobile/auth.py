@@ -6,7 +6,6 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from passlib.context import CryptContext
-from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app import models
@@ -20,6 +19,7 @@ from app.core.security import (
     verify_refresh_token,
 )
 from app.database import get_db
+from app.services.user_lookup import find_user_by_username_or_email
 from app.mobile.schemas import (
     MobileAppleAuthRequest,
     MobileAuthResponse,
@@ -110,14 +110,7 @@ def _lookup_shared_user(username: str, db: Session) -> Optional[models.User]:
     `user` table — so there is only ever one place to look, regardless of
     which system the mobile client says it's logging in as.
     """
-    return (
-        db.query(models.User)
-        .filter(
-            or_(models.User.email == username, models.User.username == username),
-            models.User.deleted == False,  # noqa: E712
-        )
-        .first()
-    )
+    return find_user_by_username_or_email(db, username, models.User.deleted == False)  # noqa: E712
 
 
 # ── Endpoint ─────────────────────────────────────────────────────────────────
