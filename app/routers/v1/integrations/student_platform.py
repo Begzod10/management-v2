@@ -141,6 +141,19 @@ def _parent_children(db: Session, parent_user_id: int) -> list[dict]:
     (docs/requests to management-v2, #12): each child's own `id` and
     `source`, resolved to a display name.
 
+    `id` is deliberately the SAME id space student_platform's own /login
+    hands the child themself (gennis: gennis_student.gennis_id; turon:
+    user.id directly) — request #21 flagged a case where this looked wrong
+    (a parent's child came back id=17395 when 675 was expected), but
+    checked directly against production data for that exact account: 17395
+    IS this student's real user.id (turon_parent_child_v2 links parent
+    19281 -> student_user_id 17395; 675 belongs to an unrelated account,
+    "ABDULLOH12"). Most likely stale test data from before this endpoint
+    was switched onto gennis-v2's/turon-v2's own real link tables (see
+    GennisParentChildLink/TuronParentChildLink's docstrings) — left as-is,
+    with `username` added below per that same doc's own fallback ask
+    ("agar username qo'shilsa, bu muammo butunlay yopiladi").
+
     Reads gennis-v2's and turon-v2's own parent-child link tables directly
     (GennisParentChildLink / TuronParentChildLink in app/models.py) — the
     real, already-populated tables those two systems' own parent admin
@@ -168,18 +181,31 @@ def _parent_children(db: Session, parent_user_id: int) -> list[dict]:
     gennis_rows = {}
     if gennis_internal_ids:
         gennis_rows = {
-            row.id: (row.gennis_id, row.name, row.surname)
-            for row in db.query(models.GennisStudent.id, models.GennisStudent.gennis_id, models.GennisStudent.name, models.GennisStudent.surname)
+            row.id: (row.gennis_id, row.user_id, row.name, row.surname)
+            for row in db.query(
+                models.GennisStudent.id,
+                models.GennisStudent.gennis_id,
+                models.GennisStudent.user_id,
+                models.GennisStudent.name,
+                models.GennisStudent.surname,
+            )
             .filter(models.GennisStudent.id.in_(gennis_internal_ids))
             .all()
         }
+    # request #21: username closes the id-space ambiguity completely,
+    # regardless of which id a caller expects — resolved through the same
+    # gennis_user_link bridge as the roster endpoints (request #20), not
+    # gennis_student's own fields (it has no username of its own).
+    gennis_usernames = student_directory.gennis_username_map(
+        db, [user_id for (_gid, user_id, _n, _s) in gennis_rows.values() if user_id]
+    )
 
     turon_ids = [link.student_user_id for link in turon_links]
-    turon_names = {}
+    turon_users = {}
     if turon_ids:
-        turon_names = {
-            row.id: (row.name, row.surname)
-            for row in db.query(models.User.id, models.User.name, models.User.surname)
+        turon_users = {
+            row.id: (row.username, row.name, row.surname)
+            for row in db.query(models.User.id, models.User.username, models.User.name, models.User.surname)
             .filter(models.User.id.in_(turon_ids))
             .all()
         }
@@ -191,11 +217,23 @@ def _parent_children(db: Session, parent_user_id: int) -> list[dict]:
             # Link points at a gennis_student row that no longer resolves —
             # skip rather than show an id student_platform can't use.
             continue
-        gennis_id, name, surname = resolved
-        children.append({"id": gennis_id, "source": "gennis", "name": name or "", "surname": surname or ""})
+        gennis_id, gennis_user_id, name, surname = resolved
+        children.append({
+            "id": gennis_id,
+            "source": "gennis",
+            "username": gennis_usernames.get(gennis_user_id),
+            "name": name or "",
+            "surname": surname or "",
+        })
     for link in turon_links:
-        name, surname = turon_names.get(link.student_user_id, ("", ""))
-        children.append({"id": link.student_user_id, "source": "turon", "name": name, "surname": surname})
+        username, name, surname = turon_users.get(link.student_user_id, (None, "", ""))
+        children.append({
+            "id": link.student_user_id,
+            "source": "turon",
+            "username": username,
+            "name": name,
+            "surname": surname,
+        })
     return children
 
 
