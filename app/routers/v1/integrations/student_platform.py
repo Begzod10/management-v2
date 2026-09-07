@@ -57,6 +57,7 @@ from app.core.security import create_access_token
 from app.database import get_db
 from app.dependencies import get_current_user
 from app.mobile.auth import _verify_external
+from app.services import student_directory
 
 router = APIRouter(prefix="/integrations/student-platform", tags=["Integrations"])
 
@@ -601,6 +602,7 @@ def student_platform_group_students(
         rows = (
             db.query(
                 models.User.id,
+                models.User.username,
                 models.User.name,
                 models.User.surname,
                 models.TuronUserProfileV2.phone,
@@ -637,6 +639,10 @@ def student_platform_group_students(
             "students": [
                 {
                     "id": r.id,
+                    # request #20 doc §1: the local-account matching key —
+                    # turon students ARE `user` rows, so this is just their
+                    # own username, no bridge/resolution needed.
+                    "username": r.username,
                     "name": r.name or "",
                     "surname": r.surname or "",
                     "phone": r.phone or "",
@@ -661,6 +667,7 @@ def student_platform_group_students(
     rows = (
         db.query(
             models.GennisStudent.gennis_id,
+            models.GennisStudent.user_id,
             models.GennisStudent.name,
             models.GennisStudent.surname,
             models.GennisStudent.phone,
@@ -673,10 +680,18 @@ def student_platform_group_students(
         .order_by(models.GennisStudent.surname, models.GennisStudent.name)
         .all()
     )
+    # request #20 doc §1: resolve `username` for the whole roster in one
+    # extra query rather than per-row — gennis_student.user_id is the
+    # GENNIS user id, bridged to the management account's username via
+    # gennis_user_link (see student_directory.gennis_username_map).
+    usernames = student_directory.gennis_username_map(
+        db, [r.user_id for r in rows if r.user_id]
+    )
     return {
         "students": [
             {
                 "id": r.gennis_id,
+                "username": usernames.get(r.user_id),
                 "name": r.name or "",
                 "surname": r.surname or "",
                 "phone": r.phone or "",
@@ -718,6 +733,7 @@ def student_platform_flow_students(
     rows = (
         db.query(
             models.User.id,
+            models.User.username,
             models.User.name,
             models.User.surname,
             models.TuronUserProfileV2.phone,
@@ -749,6 +765,7 @@ def student_platform_flow_students(
         "students": [
             {
                 "id": r.id,
+                "username": r.username,
                 "name": r.name or "",
                 "surname": r.surname or "",
                 "phone": r.phone or "",
