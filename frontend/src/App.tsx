@@ -55,6 +55,7 @@ import SchoolFlowProfilePage from "./pages/SchoolFlowProfile";
 import SchoolEmployeeProfilePage from "./pages/SchoolEmployeeProfile";
 import StatisticsPage from "./pages/Statistics";
 import ApplicationSystemPage from "./pages/ApplicationSystemPage";
+import SmmWebsiteChangePage from "./pages/SmmWebsiteChangePage";
 import NotFound from "./pages/NotFound";
 import { VoiceProvider } from "@/contexts/VoiceContext";
 
@@ -133,6 +134,7 @@ const App = () => (
                 <Route path="/school/timetable" element={<ProtectedLayout><PageGuard page="school_timetable"><SchoolTimeTablePage /></PageGuard></ProtectedLayout>} />
                 <Route path="/statistics" element={<ProtectedLayout><PageGuard page="statistics"><StatisticsPage /></PageGuard></ProtectedLayout>} />
                 <Route path="/applications" element={<ProtectedLayout><PageGuard page="applications"><ApplicationSystemPage /></PageGuard></ProtectedLayout>} />
+                <Route path="/smm/website-change/:branch" element={<ProtectedLayout><PageGuard page="smm_website_change"><SmmWebsiteChangePage /></PageGuard></ProtectedLayout>} />
                 <Route path="*" element={<NotFound />} />
               </Routes>
             </InstitutionProvider>

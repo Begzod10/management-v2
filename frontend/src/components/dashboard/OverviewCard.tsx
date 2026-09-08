@@ -3,6 +3,15 @@ import { Card, CardContent } from "@/components/ui/card";
 import { apiFetch } from "@/lib/api";
 import { formatCurrency } from "@/lib/format";
 import { Loader2 } from "lucide-react";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+
+type OverviewFilter = "all" | "gennis" | "turon";
 
 interface InstitutionStats {
   payments: { total: number };
@@ -47,6 +56,7 @@ interface Props {
 export function OverviewCard({ from, to, gennisLocationId, turonBranchId }: Props) {
   const [data, setData] = useState<OverviewData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [filter, setFilter] = useState<OverviewFilter>("all");
 
   useEffect(() => {
     setLoading(true);
@@ -72,7 +82,19 @@ export function OverviewCard({ from, to, gennisLocationId, turonBranchId }: Prop
   return (
     <Card>
       <CardContent className="p-4">
-        <p className="text-sm font-semibold mb-3 pb-2 border-b">Umumiy ko'rsatkichlar</p>
+        <div className="flex items-center justify-between mb-3 pb-2 border-b">
+          <p className="text-sm font-semibold">Umumiy ko'rsatkichlar</p>
+          <Select value={filter} onValueChange={(v) => setFilter(v as OverviewFilter)}>
+            <SelectTrigger className="w-32 h-8 text-xs">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Hammasi</SelectItem>
+              <SelectItem value="gennis">Gennis</SelectItem>
+              <SelectItem value="turon">Turon</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
 
         {loading ? (
           <div className="flex items-center justify-center py-6 gap-2 text-muted-foreground">
@@ -80,8 +102,9 @@ export function OverviewCard({ from, to, gennisLocationId, turonBranchId }: Prop
             <span className="text-xs">Yuklanmoqda...</span>
           </div>
         ) : (
-          <div className="grid grid-cols-3 gap-x-3 sm:gap-x-6">
+          <div className={`grid gap-x-3 sm:gap-x-6 ${filter === "all" ? "grid-cols-3" : "grid-cols-1"}`}>
             {/* Gennis */}
+            {(filter === "all" || filter === "gennis") && (
             <div className="space-y-2">
               <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">Gennis</p>
               <Row label="Tushum" amount={data?.gennis.payments.total ?? 0} />
@@ -95,8 +118,10 @@ export function OverviewCard({ from, to, gennisLocationId, turonBranchId }: Prop
                 <ProfitRow value={data?.gennis.remaining ?? 0} />
               </div>
             </div>
+            )}
 
             {/* Turon */}
+            {(filter === "all" || filter === "turon") && (
             <div className="space-y-2">
               <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">Turon</p>
               <Row label="Tushum" amount={data?.turon.payments.total ?? 0} />
@@ -110,8 +135,10 @@ export function OverviewCard({ from, to, gennisLocationId, turonBranchId }: Prop
                 <ProfitRow value={data?.turon.remaining ?? 0} />
               </div>
             </div>
+            )}
 
             {/* Combined */}
+            {filter === "all" && (
             <div className="space-y-2">
               <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">Jami</p>
               <Row label="Tushum" amount={data?.combined.total_payments ?? 0} bold />
@@ -125,6 +152,7 @@ export function OverviewCard({ from, to, gennisLocationId, turonBranchId }: Prop
                 <ProfitRow value={data?.combined.remaining ?? 0} bold />
               </div>
             </div>
+            )}
           </div>
         )}
       </CardContent>

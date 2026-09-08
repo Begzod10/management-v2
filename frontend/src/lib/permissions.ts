@@ -10,6 +10,7 @@ export type Role =
   | "hr"
   | "accountant"
   | "spiritualist"
+  | "smm"
   | "employee"
   | "user"
   | "volunteer";
@@ -31,19 +32,21 @@ export type Permission =
   | "projects_manage" // управление проектами и отделами
   | "sections_manage" // управление отделами
   | "school_access"   // доступ к школьным страницам (calendar, students, teachers, groups, timetable)
-  | "statistics";     // доступ к странице статистики (owner / admin)
+  | "statistics"      // доступ к странице статистики (owner / admin)
+  | "smm_access";     // доступ к SMM-страницам (website change по филиалам)
 
 // Каждая роль автоматически даёт эти права.
 // director / hr / accountant — остаются, просто теперь
 // их смысл выражен через permissions, а не через ранг.
 const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
-  owner:        ["accounting", "hr_manage", "staff_read", "jobs_manage", "salary_manage", "projects_manage", "sections_manage", "school_access", "statistics"],
-  admin:        ["accounting", "hr_manage", "staff_read", "jobs_manage", "salary_manage", "projects_manage", "sections_manage", "school_access", "statistics"],
+  owner:        ["accounting", "hr_manage", "staff_read", "jobs_manage", "salary_manage", "projects_manage", "sections_manage", "school_access", "statistics", "smm_access"],
+  admin:        ["accounting", "hr_manage", "staff_read", "jobs_manage", "salary_manage", "projects_manage", "sections_manage", "school_access", "statistics", "smm_access"],
   director:     ["staff_read", "projects_manage", "sections_manage", "school_access"],
   manager:      ["projects_manage", "sections_manage"],
   hr:           ["hr_manage", "staff_read", "jobs_manage"],
   accountant:   ["accounting", "salary_manage"],
   spiritualist: ["staff_read", "projects_manage", "sections_manage", "school_access"],
+  smm:          ["smm_access"],
   employee:     [],
   user:         [],
   volunteer:    [],
@@ -61,6 +64,7 @@ const ROLE_RANK: Record<Role, number> = {
   hr:           3,
   accountant:   2,
   spiritualist: 2,
+  smm:          1,
   employee:     1,
   user:         0,
   volunteer:    -1,
@@ -89,6 +93,7 @@ const PAGE_ACCESS: Record<string, Permission | null> = {
   school_teachers:  "school_access",
   school_groups:    "school_access",
   school_timetable: "school_access",
+  smm_website_change: "smm_access",
 };
 
 // Страницы открытые для volunteer
