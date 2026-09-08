@@ -61,12 +61,13 @@ def _row(**kwargs):
 def test_active_gennis_students_returns_id_login_id_and_username():
     # id = the student/profile id (gennis_id); login_id = the bridged
     # management user.id — deliberately different values (request #24 §A).
-    row = _row(gennis_id=17395, id=675, username="Anora2012")
+    # user_id = gennis_student's own raw old-gennis user id (request #40 §1).
+    row = _row(gennis_id=17395, user_id=98234, id=675, username="Anora2012")
     db = FakeDB(all_results={models.GennisStudent.gennis_id: [row]})
 
     result = student_directory.active_gennis_students(db)
 
-    assert result == [{"id": 17395, "login_id": 675, "username": "Anora2012"}]
+    assert result == [{"id": 17395, "user_id": 98234, "login_id": 675, "username": "Anora2012"}]
 
 
 def test_active_gennis_students_empty_when_none_active():
