@@ -48,9 +48,19 @@ def active_gennis_students(db: Session) -> list[dict]:
     """gennis_id + bridged username of every gennis student currently in at
     least one active group and whose management account can currently log
     in. `id` is the STUDENT id (gennis_student.gennis_id), matching what
-    /login and the group-roster endpoints already hand out for a student."""
+    /login and the group-roster endpoints already hand out for a student.
+
+    `user_id` (request #40 §1, 2026-09-08): gennis_student's own raw old-
+    gennis user id — previously computed internally to drive the
+    gennis_user_link join below but never returned. classroom's own records
+    for a chunk of students (776 at the time of the request) are keyed by
+    this value rather than `gennis_id`, so exposing it lets them bridge
+    those without a second round trip. It's the same value `login_id`
+    resolves through (see gennis_login_id_map), just not resolved to a
+    management account here — always present since the join above requires
+    it to be non-null already."""
     rows = (
-        db.query(models.GennisStudent.gennis_id, models.User.id, models.User.username)
+        db.query(models.GennisStudent.gennis_id, models.GennisStudent.user_id, models.User.id, models.User.username)
         .join(
             models.gennis_student_group_table,
             models.gennis_student_group_table.c.student_id == models.GennisStudent.id,
@@ -74,7 +84,7 @@ def active_gennis_students(db: Session) -> list[dict]:
         .distinct()
         .all()
     )
-    return [{"id": r.gennis_id, "login_id": r.id, "username": r.username} for r in rows]
+    return [{"id": r.gennis_id, "user_id": r.user_id, "login_id": r.id, "username": r.username} for r in rows]
 
 
 def active_gennis_teachers(db: Session) -> list[dict]:
