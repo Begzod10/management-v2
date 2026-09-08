@@ -1,5 +1,5 @@
 from datetime import datetime
-from sqlalchemy import Column, BigInteger, String, Date, DateTime, ForeignKey, Boolean, Integer, Text, Table, UniqueConstraint, Float
+from sqlalchemy import Column, BigInteger, String, Date, DateTime, Time, ForeignKey, Boolean, Integer, Text, Table, UniqueConstraint, Float
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -2288,16 +2288,86 @@ class TuronClassTimeTable(Base):
     primary teacher — a subject teacher who is never set as a group's
     primary teacher only shows up here. Used to resolve a turon teacher's
     ACTUAL teaching load for the student_platform login shim below, not just
-    their homeroom groups."""
+    their homeroom groups.
+
+    request #34/#37/#38 (2026-09-08): this table (and its siblings below —
+    TuronSubjectV2/TuronRoomV2/TuronHourV2/TuronWeekDayV2) turned out to
+    already be fully populated with current/future dates and a real
+    `subject_id` per lesson — app/routers/v1/turon/timetable.py just never
+    queried it, reading the decommissioned external turon DB instead. Only
+    `id`/`date`/`group_id`/`flow_id`/`teacher_id`/`deleted` were mapped here
+    (enough for the login shim's teaching-load lookup below); the rest of
+    the real columns are added now so the timetable endpoints can use this
+    table directly instead."""
     __tablename__ = "turon_class_time_table_v2"
     __table_args__ = {"extend_existing": True}
 
     id         = Column(BigInteger, primary_key=True)
+    name       = Column(String(255), nullable=True)
     date       = Column(Date, nullable=True)
+    branch_id  = Column(Integer, nullable=True)
+    hours_id   = Column(BigInteger, ForeignKey("turon_hour_v2.id"), nullable=True)
+    room_id    = Column(BigInteger, ForeignKey("turon_room_v2.id"), nullable=True)
+    week_id    = Column(Integer, ForeignKey("turon_week_day_v2.id"), nullable=True)
     group_id   = Column(BigInteger, ForeignKey("turon_group_v2.id"), nullable=True)
     flow_id    = Column(BigInteger, ForeignKey("turon_flow_v2.id"), nullable=True)
+    subject_id = Column(BigInteger, ForeignKey("turon_subject_v2.id"), nullable=True)
     teacher_id = Column(BigInteger, ForeignKey("user.id"), nullable=True)
     deleted    = Column(Boolean, default=False)
+
+
+class TuronSubjectV2(Base):
+    __tablename__ = "turon_subject_v2"
+    __table_args__ = {"extend_existing": True}
+
+    id       = Column(BigInteger, primary_key=True)
+    name     = Column(String(250), nullable=False)
+    disabled = Column(Boolean, default=False)
+
+
+class TuronRoomV2(Base):
+    __tablename__ = "turon_room_v2"
+    __table_args__ = {"extend_existing": True}
+
+    id         = Column(BigInteger, primary_key=True)
+    name       = Column(String(250), nullable=False)
+    branch_id  = Column(Integer, nullable=True)
+    # DB column is literally named "order" (reserved word in SQL) — see
+    # gennis_mission's `sort_order` above for the same pattern.
+    sort_order = Column("order", Integer, nullable=True)
+    deleted    = Column(Boolean, default=False)
+
+
+class TuronHourV2(Base):
+    __tablename__ = "turon_hour_v2"
+    __table_args__ = {"extend_existing": True}
+
+    id         = Column(BigInteger, primary_key=True)
+    name       = Column(String(100), nullable=False)
+    start_time = Column(Time, nullable=False)
+    end_time   = Column(Time, nullable=False)
+    branch_id  = Column(Integer, nullable=True)
+    sort_order = Column("order", Integer, nullable=False)
+    deleted    = Column(Boolean, default=False)
+
+
+class TuronWeekDayV2(Base):
+    __tablename__ = "turon_week_day_v2"
+    __table_args__ = {"extend_existing": True}
+
+    id         = Column(Integer, primary_key=True)
+    name_en    = Column(String(20), nullable=False)
+    name_uz    = Column(String(20), nullable=False)
+    sort_order = Column("order", Integer, nullable=False)
+
+
+turon_class_time_table_student_v2_table = Table(
+    "turon_class_time_table_student_v2", Base.metadata,
+    Column("id",              BigInteger, primary_key=True),
+    Column("lesson_id",       BigInteger, ForeignKey("turon_class_time_table_v2.id"), nullable=False),
+    Column("student_user_id", BigInteger, ForeignKey("user.id"),                      nullable=False),
+    extend_existing=True,
+)
 
 
 class TuronUserProfileV2(Base):
