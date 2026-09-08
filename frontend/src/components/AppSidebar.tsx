@@ -54,6 +54,7 @@ import {
   FileText,
   Calculator,
   Building2,
+  Globe,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -118,6 +119,15 @@ const accordionSections = [
       { title: "O'qituvchilar", url: "/school/teachers",  icon: BookOpen,      page: "school_teachers"  },
       { title: "Sinflar",       url: "/school/groups",    icon: UsersRound,    page: "school_groups"    },
       { title: "Dars jadvali",  url: "/school/timetable", icon: Clock,         page: "school_timetable" },
+    ],
+  },
+  {
+    label: "SMM",
+    page: "smm_access" as string | null,
+    items: [
+      { title: "Chorvoq web site change",  url: "/smm/website-change/chorvoq",  icon: Globe, page: "smm_website_change" },
+      { title: "Chirchiq web site change", url: "/smm/website-change/chirchiq", icon: Globe, page: "smm_website_change" },
+      { title: "Sergeli web site change",  url: "/smm/website-change/sergeli",  icon: Globe, page: "smm_website_change" },
     ],
   },
 ];

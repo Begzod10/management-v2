@@ -83,6 +83,7 @@ const ROLES = [
   { value: "hr", label: "HR" },
   { value: "accountant", label: "Buxgalter" },
   { value: "spiritualist", label: "Spiritualist" },
+  { value: "smm", label: "SMM" },
   { value: "user", label: "Foydalanuvchi" },
   { value: "volunteer", label: "Volontyor" },
 ];
@@ -466,7 +467,7 @@ const StaffPage = () => {
         </div>
 
         {/* ── STAFF TAB ── */}
-        <TabsContent value="staff" className="mt-0 flex-1 min-h-0 flex flex-col">
+        <TabsContent value="staff" className="mt-0 data-[state=inactive]:!hidden flex-1 min-h-0 flex flex-col">
           <div className="rounded-lg border bg-card flex-1 min-h-0 overflow-auto">
             <table className="w-full caption-bottom text-sm">
               <TableHeader className="sticky top-0 z-10 bg-card">
@@ -565,7 +566,7 @@ const StaffPage = () => {
         </TabsContent>
 
         {/* ── VOLUNTEERS TAB ── */}
-        <TabsContent value="volunteers" className="mt-0 flex-1 min-h-0 flex flex-col">
+        <TabsContent value="volunteers" className="mt-0 data-[state=inactive]:!hidden flex-1 min-h-0 flex flex-col">
           <div className="rounded-lg border bg-card flex-1 min-h-0 overflow-auto">
             <table className="w-full caption-bottom text-sm">
               <TableHeader className="sticky top-0 z-10 bg-card">

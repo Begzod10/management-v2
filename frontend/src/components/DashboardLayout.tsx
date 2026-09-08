@@ -14,7 +14,7 @@ export function DashboardLayout({ children, title, headerExtra }: DashboardLayou
       <AppSidebar />
       <div className="flex-1 flex flex-col min-w-0">
         <AppHeader title={title} extra={headerExtra} />
-        <main className="flex-1 p-3 sm:p-6 overflow-auto flex flex-col">
+        <main className="flex-1 p-3 sm:p-6 pb-20 sm:pb-24 overflow-auto flex flex-col">
           {children}
         </main>
       </div>
