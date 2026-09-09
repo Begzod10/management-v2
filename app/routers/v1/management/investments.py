@@ -10,8 +10,14 @@ from app.external_models.turon import TuronInvestment
 from app.schemas import InvestmentCreate, InvestmentUpdate, InvestmentOut
 from app.dependencies import get_current_user
 from app.utils.payment_types import resolve_payment_type_id
+from app.services.audit import log_action
 
 router = APIRouter(prefix="/investments", tags=["Investments"])
+
+
+def _target_label(obj: Investment) -> str:
+    place_id = obj.branch_id if obj.source == "turon" else obj.location_id
+    return f"{obj.source} (id={place_id})"
 
 
 def _sync_create(external_db: Session, external_model, local_obj: Investment):
@@ -80,7 +86,7 @@ def create_investment(
     db: Session = Depends(get_db),
     gennis_db: Session = Depends(get_gennis_write_db),
     turon_db: Session = Depends(get_turon_write_db),
-    _=Depends(get_current_user),
+    actor=Depends(get_current_user),
 ):
     if data.source not in ("gennis", "turon"):
         raise HTTPException(status_code=400, detail="source must be 'gennis' or 'turon'")
@@ -95,6 +101,8 @@ def create_investment(
         _sync_create(gennis_db, GennisInvestment, obj)
     else:
         _sync_create(turon_db, TuronInvestment, obj)
+
+    log_action(db, actor, "create", "investment", obj.id, _target_label(obj), obj.amount)
 
     return obj
 
@@ -118,7 +126,7 @@ def update_investment(
     db: Session = Depends(get_db),
     gennis_db: Session = Depends(get_gennis_write_db),
     turon_db: Session = Depends(get_turon_write_db),
-    _=Depends(get_current_user),
+    actor=Depends(get_current_user),
 ):
     obj = db.query(Investment).filter(Investment.id == investment_id, Investment.deleted == False).first()
     if not obj:
@@ -136,6 +144,8 @@ def update_investment(
     external_model = GennisInvestment if obj.source == "gennis" else TuronInvestment
     _sync_update(external_db, external_model, obj)
 
+    log_action(db, actor, "update", "investment", obj.id, _target_label(obj), obj.amount, details=updates)
+
     return obj
 
 
@@ -145,7 +155,7 @@ def delete_investment(
     db: Session = Depends(get_db),
     gennis_db: Session = Depends(get_gennis_write_db),
     turon_db: Session = Depends(get_turon_write_db),
-    _=Depends(get_current_user),
+    actor=Depends(get_current_user),
 ):
     obj = db.query(Investment).filter(Investment.id == investment_id, Investment.deleted == False).first()
     if not obj:
@@ -158,4 +168,7 @@ def delete_investment(
 
     obj.deleted = True
     db.commit()
+
+    log_action(db, actor, "delete", "investment", obj.id, _target_label(obj), obj.amount)
+
     return {"detail": "Investment deleted"}

@@ -10,8 +10,14 @@ from app.external_models.turon import TuronDividend
 from app.schemas import DividendCreate, DividendUpdate, DividendOut
 from app.dependencies import get_current_user
 from app.utils.payment_types import resolve_payment_type_id
+from app.services.audit import log_action
 
 router = APIRouter(prefix="/dividends", tags=["Dividends"])
+
+
+def _target_label(obj: Dividend) -> str:
+    place_id = obj.branch_id if obj.source == "turon" else obj.location_id
+    return f"{obj.source} (id={place_id})"
 
 
 def _sync_create(external_db: Session, external_model, local_obj: Dividend):
@@ -81,7 +87,7 @@ def create_dividend(
     db: Session = Depends(get_db),
     gennis_db: Session = Depends(get_gennis_write_db),
     turon_db: Session = Depends(get_turon_write_db),
-    _=Depends(get_current_user),
+    actor=Depends(get_current_user),
 ):
     if data.source not in ("gennis", "turon"):
         raise HTTPException(status_code=400, detail="source must be 'gennis' or 'turon'")
@@ -96,6 +102,8 @@ def create_dividend(
         _sync_create(gennis_db, GennisDividend, obj)
     else:
         _sync_create(turon_db, TuronDividend, obj)
+
+    log_action(db, actor, "create", "dividend", obj.id, _target_label(obj), obj.amount)
 
     return obj
 
@@ -119,7 +127,7 @@ def update_dividend(
     db: Session = Depends(get_db),
     gennis_db: Session = Depends(get_gennis_write_db),
     turon_db: Session = Depends(get_turon_write_db),
-    _=Depends(get_current_user),
+    actor=Depends(get_current_user),
 ):
     obj = db.query(Dividend).filter(Dividend.id == dividend_id, Dividend.deleted == False).first()
     if not obj:
@@ -137,6 +145,8 @@ def update_dividend(
     external_model = GennisDividend if obj.source == "gennis" else TuronDividend
     _sync_update(external_db, external_model, obj)
 
+    log_action(db, actor, "update", "dividend", obj.id, _target_label(obj), obj.amount, details=updates)
+
     return obj
 
 
@@ -146,7 +156,7 @@ def delete_dividend(
     db: Session = Depends(get_db),
     gennis_db: Session = Depends(get_gennis_write_db),
     turon_db: Session = Depends(get_turon_write_db),
-    _=Depends(get_current_user),
+    actor=Depends(get_current_user),
 ):
     obj = db.query(Dividend).filter(Dividend.id == dividend_id, Dividend.deleted == False).first()
     if not obj:
@@ -159,4 +169,7 @@ def delete_dividend(
 
     obj.deleted = True
     db.commit()
+
+    log_action(db, actor, "delete", "dividend", obj.id, _target_label(obj), obj.amount)
+
     return {"detail": "Dividend deleted"}

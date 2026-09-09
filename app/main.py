@@ -1,5 +1,6 @@
 import time
 import logging
+import traceback
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -9,7 +10,7 @@ from jose import jwt, JWTError
 from sqlalchemy import text
 from .config import settings
 from .database import gennis_write_engine, turon_write_engine, SessionLocal
-from .models import ApiLog
+from .models import ApiLog, ErrorLog
 
 _log = logging.getLogger(__name__)
 from .external_models.gennis import GennisDividend, GennisInvestment
@@ -34,7 +35,7 @@ from .routers.v1.management import (
     admin_requests, branch_transactions, overhead_type_logs,
     gennis_subjects, gennis_groups, gennis_students, gennis_leads, gennis_user_links,
     reports, voice_missions, voice_realtime, gemini_voice_realtime,
-    parent_registrations,
+    parent_registrations, logs,
 )
 from .routers.v1.gennis import detail as gennis_detail
 from .routers.v1.turon import (
@@ -112,24 +113,64 @@ app = FastAPI(
 _SKIP_LOG_PREFIXES = ("/static", "/uploads", "/docs", "/openapi.json", "/")
 
 
+def _user_id_from_request(request: Request) -> int | None:
+    auth = request.headers.get("authorization", "")
+    if auth.startswith("Bearer "):
+        try:
+            payload = jwt.decode(auth[7:], settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+            return payload.get("user_id")
+        except JWTError:
+            pass
+    return None
+
+
+def _write_error_log(method: str, path: str, status_code: int | None, user_id: int | None,
+                      error_type: str | None = None, error_message: str | None = None,
+                      tb: str | None = None) -> None:
+    db = None
+    try:
+        db = SessionLocal()
+        db.add(ErrorLog(
+            method=method,
+            path=path,
+            status_code=status_code,
+            user_id=user_id,
+            error_type=error_type,
+            error_message=error_message,
+            traceback=tb,
+        ))
+        db.commit()
+    except Exception as e:
+        _log.error(f"ErrorLog write failed: {e}")
+        if db:
+            db.rollback()
+    finally:
+        if db:
+            db.close()
+
+
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
     path = request.url.path
     if any(path == p or path.startswith(p + "/") for p in ("/static", "/uploads")):
         return await call_next(request)
 
+    user_id = _user_id_from_request(request)
     start = time.monotonic()
-    response = await call_next(request)
+    try:
+        response = await call_next(request)
+    except Exception as e:
+        _write_error_log(
+            request.method, path, 500, user_id,
+            error_type=type(e).__name__,
+            error_message=str(e),
+            tb=traceback.format_exc(),
+        )
+        raise
     elapsed_ms = (time.monotonic() - start) * 1000
 
-    user_id = None
-    auth = request.headers.get("authorization", "")
-    if auth.startswith("Bearer "):
-        try:
-            payload = jwt.decode(auth[7:], settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
-            user_id = payload.get("user_id")
-        except JWTError:
-            pass
+    if response.status_code >= 400:
+        _write_error_log(request.method, path, response.status_code, user_id)
 
     db = None
     try:
@@ -200,6 +241,7 @@ app.include_router(accountant_overheads.router, prefix=V1)
 app.include_router(accountant_salaries.router, prefix=V1)
 app.include_router(accountant_debts.router, prefix=V1)
 app.include_router(dividends.router, prefix=V1)
+app.include_router(logs.router, prefix=V1)
 app.include_router(investments.router, prefix=V1)
 app.include_router(branch_loans.router, prefix=V1)
 app.include_router(branch_transactions.router, prefix=V1)

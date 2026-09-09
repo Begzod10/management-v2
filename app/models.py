@@ -508,6 +508,49 @@ class ApiLog(Base):
     created_at = Column(DateTime, server_default=func.now(), index=True)
 
 
+class ErrorLog(Base):
+    """Unhandled-exception log, written by the request middleware in main.py.
+
+    Distinct from ApiLog (which records every request/response) because an
+    unhandled exception raises out of call_next before ApiLog's write runs —
+    this table is the only record of those.
+    """
+    __tablename__ = "error_log"
+
+    id = Column(BigInteger, primary_key=True, index=True)
+    method = Column(String(10), nullable=False)
+    path = Column(String(500), nullable=False, index=True)
+    status_code = Column(Integer, nullable=True)
+    user_id = Column(BigInteger, nullable=True, index=True)
+    error_type = Column(String(255), nullable=True)
+    error_message = Column(Text, nullable=True)
+    traceback = Column(Text, nullable=True)
+    created_at = Column(DateTime, server_default=func.now(), index=True)
+
+
+class AuditLog(Base):
+    """Business-action audit trail: which admin did what to which record.
+
+    `target_label` is a human-readable description of who/what the action
+    was for (e.g. a branch/location name) — filled in by the caller since
+    that lookup differs per entity type.
+    """
+    __tablename__ = "audit_log"
+
+    id = Column(BigInteger, primary_key=True, index=True)
+    actor_id = Column(BigInteger, ForeignKey("user.id"), nullable=True, index=True)
+    actor_name = Column(String(255), nullable=True)
+    action = Column(String(20), nullable=False)       # "create" | "update" | "delete"
+    entity_type = Column(String(50), nullable=False, index=True)  # "dividend" | "investment" | ...
+    entity_id = Column(BigInteger, nullable=False)
+    target_label = Column(String(255), nullable=True)  # "kimga" — branch/location/recipient
+    amount = Column(BigInteger, nullable=True)
+    details = Column(JSONB, nullable=True)
+    created_at = Column(DateTime, server_default=func.now(), index=True)
+
+    actor = relationship("User", foreign_keys=[actor_id])
+
+
 class BranchLoan(Base):
     """A loan agreement (branch-level). Each loan is a long-lived agreement
     settled by one or more BranchLoanTransaction rows on the source side."""
