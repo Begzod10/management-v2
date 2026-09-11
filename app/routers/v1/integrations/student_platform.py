@@ -477,13 +477,39 @@ def student_platform_login(body: StudentPlatformLoginRequest, db: Session = Depe
     # student_platform keys everything on the (source, id) pair, so an
     # unlinked account cannot be synced — say so plainly rather than
     # returning a body it would half-process into an account with no groups.
-    # A non-positive gennis_user_id is a sentinel, not an id: it marks an
-    # account created in v2 with no gennis counterpart. Treat that as
-    # unlinked rather than resolving it to nothing and handing back a
-    # person with no groups.
+    # A non-positive gennis_user_id is normally a sentinel, not an id: it's
+    # the placeholder an account created in v2 with no OLD-gennis counterpart
+    # gets stamped with. But that placeholder is the PERMANENT identity for a
+    # self-registered person once they're materialized into a real
+    # GennisStudent/GennisTeacherSync row — that row's user_id /
+    # user_gennis_id is set to the same negative value, never replaced.
+    # Treating every negative id as unconditionally unlinked made every such
+    # student/teacher 409 here forever, the moment they were enrolled, even
+    # with a fully valid account (confirmed live via gennis-v2's own copy of
+    # this same shim: Sherbek Quchqorov, gennis_student.id=329954,
+    # user_id=-19455, correct password, but always rejected here). Only fall
+    # through to turon/409 when no gennis row actually resolves for this id,
+    # positive or negative.
     source = "gennis"
     turon_profile = None
-    if gennis_link is None or not gennis_link.gennis_user_id or gennis_link.gennis_user_id <= 0:
+    gennis_resolved = False
+    if gennis_link and gennis_link.gennis_user_id:
+        if role == "teacher":
+            gennis_resolved = (
+                db.query(models.GennisTeacherSync.id)
+                .filter(models.GennisTeacherSync.user_gennis_id == gennis_link.gennis_user_id)
+                .first()
+                is not None
+            )
+        else:
+            gennis_resolved = (
+                db.query(models.GennisStudent.id)
+                .filter(models.GennisStudent.user_id == gennis_link.gennis_user_id)
+                .first()
+                is not None
+            )
+
+    if not gennis_resolved:
         source = "turon"
         turon_profile = (
             db.query(models.TuronUserProfileV2)
