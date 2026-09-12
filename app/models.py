@@ -1,5 +1,5 @@
 from datetime import datetime
-from sqlalchemy import Column, BigInteger, String, Date, DateTime, Time, ForeignKey, Boolean, Integer, Text, Table, UniqueConstraint, Float
+from sqlalchemy import Column, BigInteger, String, Date, DateTime, Time, ForeignKey, Boolean, Integer, Text, Table, UniqueConstraint, Float, JSON
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -2287,10 +2287,19 @@ class TuronGroupV2(Base):
     branch_id        = Column(Integer, nullable=True)
     class_number_id  = Column(BigInteger, ForeignKey("turon_class_number_v2.id"), nullable=True)
     color_id         = Column(BigInteger, ForeignKey("turon_class_color_v2.id"), nullable=True)
+    language_id      = Column(BigInteger, ForeignKey("turon_language_v2.id"), nullable=True)
     price            = Column(Integer, nullable=True)
     teacher_id       = Column(BigInteger, ForeignKey("user.id"), nullable=True)
     status           = Column(Boolean, default=True)
     deleted          = Column(Boolean, default=False)
+
+
+class TuronLanguageV2(Base):
+    __tablename__ = "turon_language_v2"
+    __table_args__ = {"extend_existing": True}
+
+    id   = Column(BigInteger, primary_key=True)
+    name = Column(String(250), nullable=False)
 
 
 turon_group_student_v2_table = Table(
@@ -2304,16 +2313,40 @@ turon_group_student_v2_table = Table(
 
 class TuronFlowV2(Base):
     """A student's second, independent container in turon — NOT derived from
-    Group membership. Has no price: unlike a group it isn't a billing unit."""
+    Group membership. Has no price: unlike a group it isn't a billing unit.
+
+    request #43 §4 (2026-09-12): flow/flow-list read the decommissioned
+    external turon DB (same bug class as timetable.py/classes.py, docs
+    #34/#37/#38/#43§3) — its teacher_id was frozen at whatever the last
+    pre-decommission sync captured (140/326 flows), never updated since.
+    This table's own teacher_id (206 active flows, 181 with a teacher —
+    live, currently maintained) was already mapped for the login shim's
+    teaching-load lookup, but only that one field; the rest are added now
+    so flow/flow-list can read from here instead."""
     __tablename__ = "turon_flow_v2"
     __table_args__ = {"extend_existing": True}
 
+    id          = Column(BigInteger, primary_key=True)
+    name        = Column(String(255), nullable=True)
+    description = Column(String(500), nullable=True)
+    branch_id   = Column(Integer, nullable=True)
+    subject_id  = Column(BigInteger, ForeignKey("turon_subject_v2.id"), nullable=True)
+    teacher_id  = Column(BigInteger, ForeignKey("user.id"), nullable=True)
+    level_id    = Column(Integer, ForeignKey("turon_subject_level_v2.id"), nullable=True)
+    classes     = Column(JSON, nullable=True)
+    sort_order  = Column("order", Integer, nullable=True)
+    activity    = Column(Boolean, default=False)
+    deleted     = Column(Boolean, default=False)
+
+
+class TuronSubjectLevelV2(Base):
+    __tablename__ = "turon_subject_level_v2"
+    __table_args__ = {"extend_existing": True}
+
     id         = Column(BigInteger, primary_key=True)
-    name       = Column(String(255), nullable=True)
-    branch_id  = Column(Integer, nullable=True)
-    teacher_id = Column(BigInteger, ForeignKey("user.id"), nullable=True)
-    activity   = Column(Boolean, default=False)
-    deleted    = Column(Boolean, default=False)
+    name       = Column(String(250), nullable=False)
+    subject_id = Column(BigInteger, ForeignKey("turon_subject_v2.id"), nullable=False)
+    disabled   = Column(Boolean, default=False)
 
 
 turon_flow_student_v2_table = Table(
