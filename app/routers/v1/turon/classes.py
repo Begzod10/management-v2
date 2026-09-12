@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import select, func
 
-from app.database import get_turon_db
+from app.database import get_db, get_turon_db
 from app.external_models.turon import (
     ClassNumber, ClassTypes, ClassColors, Language, Teacher, CustomUser,
     Group, Subject, SubjectLevel, Student, Branch, GroupReason,
@@ -13,6 +13,7 @@ from app.external_models.turon import (
     group_teachers, group_students, teacher_subjects,
 )
 from app.routers.v1.auth import get_current_user
+from app import models
 from app.models import User
 
 router = APIRouter(prefix="/turon", tags=["Turon Classes"])
@@ -91,6 +92,15 @@ def group_create_teachers(
 
 
 # ── Group classes ──────────────────────────────────────────────────────────────
+#
+# request #43 §3 (2026-09-12): read from the decommissioned external turon
+# DB (get_turon_db) — same class of bug as /turon/timetable/* (docs #34/#37/
+# #38, fixed 2026-09-08): the real, current roster lives in this app's own
+# turon_group_v2 and friends. Classroom's own group ids (from this endpoint,
+# pre-fix) and the timetable's group ids (already reading turon_group_v2)
+# came from two different id spaces entirely — zero overlap, not a filter
+# problem. Switched both group/classes and group/classes2 to the v2 tables;
+# response shape unchanged.
 
 @router.get("/group/classes")
 def group_classes(
@@ -100,59 +110,44 @@ def group_classes(
     search: Optional[str] = Query(None),
     limit: int = Query(20),
     offset: int = Query(0),
-    db: Session = Depends(get_turon_db),
+    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    q = db.query(Group).filter(Group.class_number_id.isnot(None))
+    q = db.query(models.TuronGroupV2).filter(models.TuronGroupV2.class_number_id.isnot(None))
 
     if deleted is not None:
-        q = q.filter(Group.deleted == deleted)
+        q = q.filter(models.TuronGroupV2.deleted == deleted)
     if branch:
-        q = q.filter(Group.branch_id == branch)
+        q = q.filter(models.TuronGroupV2.branch_id == branch)
     if teacher:
-        group_ids_for_teacher = {
-            r[0] for r in db.execute(
-                select(group_teachers.c.group_id).where(group_teachers.c.teacher_id == teacher)
-            ).fetchall()
-        }
-        q = q.filter(Group.id.in_(group_ids_for_teacher))
+        q = q.filter(models.TuronGroupV2.teacher_id == teacher)
     if search:
         term = f"%{search}%"
-        q = q.filter(Group.name.ilike(term))
+        q = q.filter(models.TuronGroupV2.name.ilike(term))
 
     total = q.count()
-    groups = q.order_by(Group.class_number_id, Group.id).offset(offset).limit(limit).all()
+    groups = q.order_by(models.TuronGroupV2.class_number_id, models.TuronGroupV2.id).offset(offset).limit(limit).all()
 
     group_ids = [g.id for g in groups]
 
     # Pre-fetch class numbers
     cn_ids = {g.class_number_id for g in groups if g.class_number_id}
-    class_numbers = {cn.id: cn for cn in db.query(ClassNumber).filter(ClassNumber.id.in_(cn_ids)).all()} if cn_ids else {}
+    class_numbers = {cn.id: cn for cn in db.query(models.TuronClassNumberV2).filter(models.TuronClassNumberV2.id.in_(cn_ids)).all()} if cn_ids else {}
 
     # Pre-fetch colors
     color_ids = {g.color_id for g in groups if g.color_id}
-    colors = {c.id: c for c in db.query(ClassColors).filter(ClassColors.id.in_(color_ids)).all()} if color_ids else {}
+    colors = {c.id: c for c in db.query(models.TuronClassColorV2).filter(models.TuronClassColorV2.id.in_(color_ids)).all()} if color_ids else {}
 
-    # Pre-fetch first teacher per group
-    teacher_rows = db.execute(
-        select(group_teachers.c.group_id, group_teachers.c.teacher_id)
-        .where(group_teachers.c.group_id.in_(group_ids))
-    ).fetchall()
-    group_first_teacher: dict = {}
-    for gid, tid in teacher_rows:
-        if gid not in group_first_teacher:
-            group_first_teacher[gid] = tid
-
-    teacher_ids = set(group_first_teacher.values())
-    teachers_objs = {t.id: t for t in db.query(Teacher).filter(Teacher.id.in_(teacher_ids)).all()} if teacher_ids else {}
-    user_ids = {t.user_id for t in teachers_objs.values()}
-    t_users = {u.id: u for u in db.query(CustomUser).filter(CustomUser.id.in_(user_ids)).all()} if user_ids else {}
+    # Teacher per group — turon_group_v2.teacher_id IS user.id directly, no
+    # separate teacher-record indirection like the old external Teacher table.
+    teacher_ids = {g.teacher_id for g in groups if g.teacher_id}
+    t_users = {u.id: u for u in db.query(User).filter(User.id.in_(teacher_ids)).all()} if teacher_ids else {}
 
     # Student counts per group
     student_count_rows = db.execute(
-        select(group_students.c.group_id, func.count(group_students.c.student_id))
-        .where(group_students.c.group_id.in_(group_ids))
-        .group_by(group_students.c.group_id)
+        select(models.turon_group_student_v2_table.c.group_id, func.count(models.turon_group_student_v2_table.c.student_user_id))
+        .where(models.turon_group_student_v2_table.c.group_id.in_(group_ids))
+        .group_by(models.turon_group_student_v2_table.c.group_id)
     ).fetchall()
     student_counts = {r[0]: r[1] for r in student_count_rows}
 
@@ -160,9 +155,7 @@ def group_classes(
     for g in groups:
         cn = class_numbers.get(g.class_number_id)
         color = colors.get(g.color_id)
-        tid = group_first_teacher.get(g.id)
-        t_obj = teachers_objs.get(tid) if tid else None
-        u_obj = t_users.get(t_obj.user_id) if t_obj else None
+        u_obj = t_users.get(g.teacher_id) if g.teacher_id else None
         teacher_name = f"{u_obj.name} {u_obj.surname}" if u_obj else None
 
         results.append({
@@ -183,82 +176,72 @@ def group_classes(
 def group_classes2(
     branch: Optional[int] = Query(None),
     deleted: Optional[bool] = Query(False),
-    db: Session = Depends(get_turon_db),
+    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    q = db.query(Group).filter(Group.class_number_id.isnot(None))
+    q = db.query(models.TuronGroupV2).filter(models.TuronGroupV2.class_number_id.isnot(None))
 
     if deleted is not None:
-        q = q.filter(Group.deleted == deleted)
+        q = q.filter(models.TuronGroupV2.deleted == deleted)
     if branch:
-        q = q.filter(Group.branch_id == branch)
+        q = q.filter(models.TuronGroupV2.branch_id == branch)
 
-    groups = q.order_by(Group.class_number_id, Group.id).all()
+    groups = q.order_by(models.TuronGroupV2.class_number_id, models.TuronGroupV2.id).all()
     group_ids = [g.id for g in groups]
 
     # Pre-fetch class numbers
     cn_ids = {g.class_number_id for g in groups if g.class_number_id}
-    class_numbers = {cn.id: cn for cn in db.query(ClassNumber).filter(ClassNumber.id.in_(cn_ids)).all()} if cn_ids else {}
+    class_numbers = {cn.id: cn for cn in db.query(models.TuronClassNumberV2).filter(models.TuronClassNumberV2.id.in_(cn_ids)).all()} if cn_ids else {}
 
     # Pre-fetch colors
     color_ids = {g.color_id for g in groups if g.color_id}
-    colors = {c.id: c for c in db.query(ClassColors).filter(ClassColors.id.in_(color_ids)).all()} if color_ids else {}
+    colors = {c.id: c for c in db.query(models.TuronClassColorV2).filter(models.TuronClassColorV2.id.in_(color_ids)).all()} if color_ids else {}
 
     # Pre-fetch languages
     lang_ids = {g.language_id for g in groups if g.language_id}
-    languages = {l.id: l for l in db.query(Language).filter(Language.id.in_(lang_ids)).all()} if lang_ids else {}
+    languages = {l.id: l for l in db.query(models.TuronLanguageV2).filter(models.TuronLanguageV2.id.in_(lang_ids)).all()} if lang_ids else {}
 
-    # Pre-fetch first teacher per group
-    teacher_rows = db.execute(
-        select(group_teachers.c.group_id, group_teachers.c.teacher_id)
-        .where(group_teachers.c.group_id.in_(group_ids))
-    ).fetchall()
-    group_first_teacher: dict = {}
-    for gid, tid in teacher_rows:
-        if gid not in group_first_teacher:
-            group_first_teacher[gid] = tid
+    # Teacher per group — turon_group_v2.teacher_id IS user.id directly.
+    teacher_ids = {g.teacher_id for g in groups if g.teacher_id}
+    t_users = {u.id: u for u in db.query(User).filter(User.id.in_(teacher_ids)).all()} if teacher_ids else {}
 
-    teacher_ids = set(group_first_teacher.values())
-    teachers_objs = {t.id: t for t in db.query(Teacher).filter(Teacher.id.in_(teacher_ids)).all()} if teacher_ids else {}
-    user_ids = {t.user_id for t in teachers_objs.values()}
-    t_users = {u.id: u for u in db.query(CustomUser).filter(CustomUser.id.in_(user_ids)).all()} if user_ids else {}
-
-    # Students per group
+    # Students per group — turon_group_student_v2.student_user_id IS user.id directly.
     student_rows = db.execute(
-        select(group_students.c.group_id, group_students.c.student_id)
-        .where(group_students.c.group_id.in_(group_ids))
+        select(models.turon_group_student_v2_table.c.group_id, models.turon_group_student_v2_table.c.student_user_id)
+        .where(models.turon_group_student_v2_table.c.group_id.in_(group_ids))
     ).fetchall()
     group_student_ids: dict = {}
     for gid, sid in student_rows:
         group_student_ids.setdefault(gid, []).append(sid)
 
     all_student_ids = {sid for sids in group_student_ids.values() for sid in sids}
-    students_map = {s.id: s for s in db.query(Student).filter(Student.id.in_(all_student_ids)).all()} if all_student_ids else {}
-    student_user_ids = {s.user_id for s in students_map.values() if s.user_id}
-    student_users = {u.id: u for u in db.query(CustomUser).filter(CustomUser.id.in_(student_user_ids)).all()} if student_user_ids else {}
+    student_users = {u.id: u for u in db.query(User).filter(User.id.in_(all_student_ids)).all()} if all_student_ids else {}
+    # phone isn't on User itself — turon_user_profile_v2 carries it (see
+    # TuronUserProfileV2's docstring: existence marks the account as turon at all)
+    student_profiles = {
+        p.user_id: p for p in db.query(models.TuronUserProfileV2).filter(models.TuronUserProfileV2.user_id.in_(all_student_ids)).all()
+    } if all_student_ids else {}
 
     results = []
     for g in groups:
         cn = class_numbers.get(g.class_number_id)
         color = colors.get(g.color_id)
         lang = languages.get(g.language_id)
-        tid = group_first_teacher.get(g.id)
-        t_obj = teachers_objs.get(tid) if tid else None
-        u_obj = t_users.get(t_obj.user_id) if t_obj else None
+        u_obj = t_users.get(g.teacher_id) if g.teacher_id else None
         teacher_name = f"{u_obj.name} {u_obj.surname}" if u_obj else None
 
         s_ids = group_student_ids.get(g.id, [])
         students_list = []
         for sid in s_ids:
-            s = students_map.get(sid)
-            if not s:
+            su = student_users.get(sid)
+            if not su:
                 continue
-            su = student_users.get(s.user_id) if s.user_id else None
+            profile = student_profiles.get(sid)
             students_list.append({
-                "id": s.id,
-                "name": su.name if su else None,
-                "surname": su.surname if su else None,
-                "phone": su.phone if su else None,
+                "id": su.id,
+                "name": su.name,
+                "surname": su.surname,
+                "phone": profile.phone if profile else None,
             })
 
         results.append({
@@ -931,18 +914,26 @@ def student_exam_results(
 
 
 # ── Flows ──────────────────────────────────────────────────────────────────────
+#
+# request #43 §4 (2026-09-12): same bug as group/classes above — read the
+# decommissioned external turon DB, frozen at whatever the last pre-
+# decommission sync captured (140/326 flows had a teacher; a new flow's
+# teacher was never reflected here). turon_flow_v2 is live (206 active,
+# 181 with a teacher) — switched to it, and added `teacher_id` to the
+# response directly (classroom's own fallback ask) alongside the existing
+# name fields.
 
 @router.get("/flow/flow-list")
 def flow_list(
     branch: Optional[int] = Query(None),
     limit: int = Query(50),
     offset: int = Query(0),
-    db: Session = Depends(get_turon_db),
+    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    q = db.query(Flow).order_by(Flow.order)
+    q = db.query(models.TuronFlowV2).filter(models.TuronFlowV2.deleted == False).order_by(models.TuronFlowV2.sort_order)  # noqa: E712
     if branch:
-        q = q.filter(Flow.branch_id == branch)
+        q = q.filter(models.TuronFlowV2.branch_id == branch)
 
     total = q.count()
     flows = q.offset(offset).limit(limit).all()
@@ -954,26 +945,23 @@ def flow_list(
     level_ids = {f.level_id for f in flows if f.level_id}
     branch_ids = {f.branch_id for f in flows if f.branch_id}
 
-    subjects_map = {s.id: s for s in db.query(Subject).filter(Subject.id.in_(subject_ids)).all()} if subject_ids else {}
-    teachers_map = {t.id: t for t in db.query(Teacher).filter(Teacher.id.in_(teacher_ids)).all()} if teacher_ids else {}
-    user_ids = {t.user_id for t in teachers_map.values() if t.user_id}
-    t_users = {u.id: u for u in db.query(CustomUser).filter(CustomUser.id.in_(user_ids)).all()} if user_ids else {}
-    levels_map = {lv.id: lv for lv in db.query(SubjectLevel).filter(SubjectLevel.id.in_(level_ids)).all()} if level_ids else {}
-    branches_map = {b.id: b for b in db.query(Branch).filter(Branch.id.in_(branch_ids)).all()} if branch_ids else {}
+    subjects_map = {s.id: s for s in db.query(models.TuronSubjectV2).filter(models.TuronSubjectV2.id.in_(subject_ids)).all()} if subject_ids else {}
+    t_users = {u.id: u for u in db.query(User).filter(User.id.in_(teacher_ids)).all()} if teacher_ids else {}
+    levels_map = {lv.id: lv for lv in db.query(models.TuronSubjectLevelV2).filter(models.TuronSubjectLevelV2.id.in_(level_ids)).all()} if level_ids else {}
+    branches_map = {b.id: b for b in db.query(models.TuronBranchV2).filter(models.TuronBranchV2.id.in_(branch_ids)).all()} if branch_ids else {}
 
     # Student counts per flow
     count_rows = db.execute(
-        select(flow_students.c.flow_id, func.count(flow_students.c.student_id))
-        .where(flow_students.c.flow_id.in_(flow_ids))
-        .group_by(flow_students.c.flow_id)
+        select(models.turon_flow_student_v2_table.c.flow_id, func.count(models.turon_flow_student_v2_table.c.student_user_id))
+        .where(models.turon_flow_student_v2_table.c.flow_id.in_(flow_ids))
+        .group_by(models.turon_flow_student_v2_table.c.flow_id)
     ).fetchall()
     student_counts = {r[0]: r[1] for r in count_rows}
 
     results = []
     for f in flows:
         subj = subjects_map.get(f.subject_id)
-        tch = teachers_map.get(f.teacher_id)
-        tch_user = t_users.get(tch.user_id) if tch else None
+        tch_user = t_users.get(f.teacher_id) if f.teacher_id else None
         level = levels_map.get(f.level_id)
         branch_obj = branches_map.get(f.branch_id)
 
@@ -983,6 +971,7 @@ def flow_list(
             "activity": f.activity,
             "classes": f.classes,
             "subject_name": subj.name if subj else None,
+            "teacher_id": f.teacher_id,
             "teacher_name": tch_user.name if tch_user else None,
             "teacher_surname": tch_user.surname if tch_user else None,
             "student_count": student_counts.get(f.id, 0),
