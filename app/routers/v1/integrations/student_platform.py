@@ -46,6 +46,7 @@ name this differently because their own schemas do:
     branch), `branch_name` looked up from `turon_branch_v2`.
 """
 from datetime import date, timedelta
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
@@ -67,6 +68,17 @@ class StudentPlatformLoginRequest(BaseModel):
     # old gennis took "username"; keep that name so the caller is unchanged
     username: str
     password: str
+    # request #43 §1 (2026-09-12): an account can be a gennis person, a
+    # turon person, or both (see this module's docstring) — without this,
+    # a dual-linked account always resolved to gennis, so a turon person
+    # sharing a username with a gennis-linked account could never log into
+    # their own turon side; the caller had no way to say which one they
+    # meant. Accepts either field name (classroom tried both); `source`
+    # wins if both are somehow sent. Optional and case-insensitive so an
+    # existing caller that sends neither keeps today's gennis-preferred
+    # auto-detect behavior unchanged.
+    source: Optional[str] = None
+    system_name: Optional[str] = None
 
 
 def _groups_for_teacher(db: Session, teacher_gennis_id: int) -> list[dict]:
@@ -490,37 +502,72 @@ def student_platform_login(body: StudentPlatformLoginRequest, db: Session = Depe
     # user_id=-19455, correct password, but always rejected here). Only fall
     # through to turon/409 when no gennis row actually resolves for this id,
     # positive or negative.
-    source = "gennis"
-    turon_profile = None
-    gennis_resolved = False
-    if gennis_link and gennis_link.gennis_user_id:
+    def _gennis_resolved() -> bool:
+        if not (gennis_link and gennis_link.gennis_user_id):
+            return False
         if role == "teacher":
-            gennis_resolved = (
+            return (
                 db.query(models.GennisTeacherSync.id)
                 .filter(models.GennisTeacherSync.user_gennis_id == gennis_link.gennis_user_id)
                 .first()
                 is not None
             )
-        else:
-            gennis_resolved = (
-                db.query(models.GennisStudent.id)
-                .filter(models.GennisStudent.user_id == gennis_link.gennis_user_id)
-                .first()
-                is not None
-            )
+        return (
+            db.query(models.GennisStudent.id)
+            .filter(models.GennisStudent.user_id == gennis_link.gennis_user_id)
+            .first()
+            is not None
+        )
 
-    if not gennis_resolved:
-        source = "turon"
-        turon_profile = (
+    def _turon_profile():
+        return (
             db.query(models.TuronUserProfileV2)
             .filter(models.TuronUserProfileV2.user_id == user.id)
             .first()
         )
-        if turon_profile is None:
+
+    requested_source = (body.source or body.system_name)
+    if requested_source is not None:
+        requested_source = requested_source.strip().lower()
+
+    if requested_source is not None:
+        # request #43 §1: an explicit source picks a specific side of a
+        # dual-linked account (see this module's docstring) instead of
+        # always preferring gennis. Wrong system -> 409, same code and
+        # message shape as "linked to neither", never the misleading 401 a
+        # password check would give (the password IS correct; it's the
+        # SAME account either way — only which linked record to resolve to
+        # is in question).
+        if requested_source not in ("gennis", "turon"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="source must be 'gennis' or 'turon'",
+            )
+        source = requested_source
+        turon_profile = _turon_profile() if source == "turon" else None
+        if source == "gennis" and not _gennis_resolved():
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail="This account is not linked to a gennis or turon teacher/student record",
+                detail="This account is not linked to a gennis teacher/student record",
             )
+        if source == "turon" and turon_profile is None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="This account is not linked to a turon teacher/student record",
+            )
+    else:
+        # No source specified — unchanged default: prefer gennis whenever
+        # it actually resolves, falling back to turon only when it doesn't.
+        source = "gennis"
+        turon_profile = None
+        if not _gennis_resolved():
+            source = "turon"
+            turon_profile = _turon_profile()
+            if turon_profile is None:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="This account is not linked to a gennis or turon teacher/student record",
+                )
 
     # `id` is what student_platform keys its local account on. For turon
     # this is simply user.id. For gennis it's NOT that simple — teachers use
