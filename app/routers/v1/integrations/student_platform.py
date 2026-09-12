@@ -46,6 +46,7 @@ name this differently because their own schemas do:
     branch), `branch_name` looked up from `turon_branch_v2`.
 """
 from datetime import date, timedelta
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
@@ -67,6 +68,17 @@ class StudentPlatformLoginRequest(BaseModel):
     # old gennis took "username"; keep that name so the caller is unchanged
     username: str
     password: str
+    # request #43 §1 (2026-09-12): an account can be a gennis person, a
+    # turon person, or both (see this module's docstring) — without this,
+    # a dual-linked account always resolved to gennis, so a turon person
+    # sharing a username with a gennis-linked account could never log into
+    # their own turon side; the caller had no way to say which one they
+    # meant. Accepts either field name (classroom tried both); `source`
+    # wins if both are somehow sent. Optional and case-insensitive so an
+    # existing caller that sends neither keeps today's gennis-preferred
+    # auto-detect behavior unchanged.
+    source: Optional[str] = None
+    system_name: Optional[str] = None
 
 
 def _groups_for_teacher(db: Session, teacher_gennis_id: int) -> list[dict]:
@@ -481,20 +493,57 @@ def student_platform_login(body: StudentPlatformLoginRequest, db: Session = Depe
     # account created in v2 with no gennis counterpart. Treat that as
     # unlinked rather than resolving it to nothing and handing back a
     # person with no groups.
-    source = "gennis"
-    turon_profile = None
-    if gennis_link is None or not gennis_link.gennis_user_id or gennis_link.gennis_user_id <= 0:
-        source = "turon"
-        turon_profile = (
+    has_gennis_link = bool(gennis_link and gennis_link.gennis_user_id and gennis_link.gennis_user_id > 0)
+
+    def _turon_profile():
+        return (
             db.query(models.TuronUserProfileV2)
             .filter(models.TuronUserProfileV2.user_id == user.id)
             .first()
         )
-        if turon_profile is None:
+
+    requested_source = (body.source or body.system_name)
+    if requested_source is not None:
+        requested_source = requested_source.strip().lower()
+
+    if requested_source is not None:
+        # request #43 §1: an explicit source picks a specific side of a
+        # dual-linked account (see this module's docstring) instead of
+        # always preferring gennis. Wrong system -> 409, same code and
+        # message shape as "linked to neither", never the misleading 401 a
+        # password check would give (the password IS correct; it's the
+        # SAME account either way — only which linked record to resolve to
+        # is in question).
+        if requested_source not in ("gennis", "turon"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="source must be 'gennis' or 'turon'",
+            )
+        source = requested_source
+        turon_profile = _turon_profile() if source == "turon" else None
+        if source == "gennis" and not has_gennis_link:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail="This account is not linked to a gennis or turon teacher/student record",
+                detail="This account is not linked to a gennis teacher/student record",
             )
+        if source == "turon" and turon_profile is None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="This account is not linked to a turon teacher/student record",
+            )
+    else:
+        # No source specified — unchanged default: prefer gennis whenever
+        # linked, falling back to turon only when it isn't.
+        source = "gennis"
+        turon_profile = None
+        if not has_gennis_link:
+            source = "turon"
+            turon_profile = _turon_profile()
+            if turon_profile is None:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="This account is not linked to a gennis or turon teacher/student record",
+                )
 
     # `id` is what student_platform keys its local account on. For turon
     # this is simply user.id. For gennis it's NOT that simple — teachers use
