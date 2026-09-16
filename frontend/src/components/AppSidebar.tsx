@@ -130,6 +130,7 @@ const accordionSections = [
       { title: "Chorvoq web site change",  url: "/smm/website-change/chorvoq",  icon: Globe, page: "smm_website_change" },
       { title: "Chirchiq web site change", url: "/smm/website-change/chirchiq", icon: Globe, page: "smm_website_change" },
       { title: "Sergeli web site change",  url: "/smm/website-change/sergeli",  icon: Globe, page: "smm_website_change" },
+      { title: "Gennis web site change",   url: "/smm/website-change/gennis",   icon: Globe, page: "smm_website_change" },
     ],
   },
 ];

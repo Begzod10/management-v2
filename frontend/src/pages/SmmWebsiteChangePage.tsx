@@ -4,10 +4,13 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { ExternalLink, Globe } from "lucide-react";
 
-const BRANCH_SITES: Record<string, { label: string; domain: string }> = {
+const BRANCH_SITES: Record<string, { label: string; domain: string; path?: string }> = {
   chorvoq: { label: "Chorvoq", domain: "chorvoq.tisedu.uz" },
   chirchiq: { label: "Chirchiq", domain: "chirchiq.tisedu.uz" },
   sergeli: { label: "Sergeli", domain: "sergeli.tisedu.uz" },
+  // gennis-home is a separate standalone site (not a Turon branch) — its
+  // admin login lives at /login, not /admin like the Turon branch sites.
+  gennis: { label: "Gennis", domain: "gennis.uz", path: "/login" },
 };
 
 // Each branch's public site ships its own admin panel (/admin login,
@@ -17,7 +20,7 @@ const SmmWebsiteChangePage = () => {
   const { branch = "" } = useParams<{ branch: string }>();
   const site = BRANCH_SITES[branch];
   const branchLabel = site?.label ?? branch;
-  const adminUrl = site ? `https://${site.domain}/admin` : null;
+  const adminUrl = site ? `https://${site.domain}${site.path ?? "/admin"}` : null;
 
   return (
     <DashboardLayout title={`${branchLabel} — Web site change`}>
