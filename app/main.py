@@ -38,6 +38,7 @@ from .routers.v1.management import (
     parent_registrations, logs,
 )
 from .routers.v1.gennis import detail as gennis_detail
+from .routers.v1.gennis import website as gennis_website
 from .routers.v1.turon import (
     calendar, classes as turon_classes, detail as turon_detail,
     students as turon_students, teachers as turon_teachers,
@@ -198,7 +199,12 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:3000", "http://localhost:5173", "100.81.196.80:3000",
                     "https://office.gennis.uz", "https://school.gennis.uz",
-                    "https://admin.gennis.uz", "https://management.gennis.uz"],
+                    "https://admin.gennis.uz", "https://management.gennis.uz",
+                    # gennis-home (the public marketing site's new standalone
+                    # frontend) calls the read-only /gennis/website/* endpoints
+                    # directly from the browser. localhost:3002 is its CRA dev
+                    # server; gennis.uz/www.gennis.uz is its production domain.
+                    "http://localhost:3002", "https://gennis.uz", "https://www.gennis.uz"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -232,6 +238,7 @@ app.include_router(voice_missions.router, prefix=V1)
 app.include_router(voice_realtime.router, prefix=V1)
 app.include_router(gemini_voice_realtime.router, prefix=V1)
 app.include_router(gennis_detail.router, prefix=V1)
+app.include_router(gennis_website.router, prefix=V1)
 app.include_router(turon_detail.router, prefix=V1)
 app.include_router(overhead_types.router, prefix=V1)
 app.include_router(accountant_dashboard.router, prefix=V1)

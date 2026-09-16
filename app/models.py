@@ -3072,3 +3072,123 @@ class GennisDeletedOverheadTypeLog(Base):
     year                     = Column(Integer, nullable=True)
     month                    = Column(Integer, nullable=True)
     synced_at                = Column(DateTime, server_default=func.now())
+
+
+# ── Gennis public website content ──────────────────────────────────────────
+#
+# The old "gennis" project's public marketing site (advantages, news/events,
+# a fixed gallery, public teacher profiles) is being ported here as v2-native
+# tables ("_v2" suffix — nothing is synced from the old external DB, this
+# content is authored directly through the admin endpoints below).
+
+class GennisWebsiteAdvantage(Base):
+    """A single advantage tile on the public home page (image + name + text)."""
+
+    __tablename__ = "gennis_website_advantage_v2"
+
+    id            = Column(BigInteger, primary_key=True, index=True, autoincrement=True)
+    title         = Column(String(255), nullable=False)
+    image         = Column(String(500), nullable=True)
+    display_order = Column(Integer, nullable=False, default=0)
+    created_at    = Column(DateTime, server_default=func.now())
+    updated_at    = Column(DateTime, server_default=func.now(), onupdate=func.now())
+    deleted       = Column(Boolean, nullable=False, default=False)
+
+
+class GennisWebsiteNews(Base):
+    """A news/event post on the public home page, with social share links."""
+
+    __tablename__ = "gennis_website_news_v2"
+
+    id          = Column(BigInteger, primary_key=True, index=True, autoincrement=True)
+    title       = Column(String(255), nullable=False)
+    description = Column(Text, nullable=False)
+    image       = Column(String(500), nullable=True)
+    created_at  = Column(DateTime, server_default=func.now())
+    updated_at  = Column(DateTime, server_default=func.now(), onupdate=func.now())
+    deleted     = Column(Boolean, nullable=False, default=False)
+
+    links = relationship(
+        "GennisWebsiteNewsLink", back_populates="news", cascade="all, delete-orphan"
+    )
+
+
+class GennisWebsiteNewsLink(Base):
+    """A social link attached to a news post (e.g. telegram/instagram post URL)."""
+
+    __tablename__ = "gennis_website_news_link_v2"
+
+    id        = Column(BigInteger, primary_key=True, index=True, autoincrement=True)
+    news_id   = Column(BigInteger, ForeignKey("gennis_website_news_v2.id", ondelete="CASCADE"), nullable=False, index=True)
+    link_type = Column(String(50), nullable=False)
+    url       = Column(String(500), nullable=False)
+
+    news = relationship("GennisWebsiteNews", back_populates="links")
+
+
+class GennisWebsiteGalleryImage(Base):
+    """One image in the public home page gallery.
+
+    Old gennis's gallery was a fixed 8-slot grid; `slot` is kept nullable and
+    unconstrained here rather than enforced as exactly 8 rows, so the admin UI
+    can still present a fixed grid without the schema hard-coding that count.
+    """
+
+    __tablename__ = "gennis_website_gallery_image_v2"
+
+    id         = Column(BigInteger, primary_key=True, index=True, autoincrement=True)
+    image      = Column(String(500), nullable=True)
+    slot       = Column(Integer, nullable=True)
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
+class GennisWebsiteTeacherProfile(Base):
+    """A public teacher profile shown on the marketing site.
+
+    teacher_user_id links to a real management `user` row where one exists,
+    but stays nullable + unique (not the primary key) because a public
+    profile may be authored for a teacher who doesn't cleanly map to an
+    internal account yet. teacher_gennis_id is kept as a raw external-id
+    fallback, mirroring the gennis_id convention used across this file for
+    references into the old system. name/subject_display are stored directly
+    so the public page never depends on a `user` join resolving.
+    """
+
+    __tablename__ = "gennis_website_teacher_profile_v2"
+
+    id                = Column(BigInteger, primary_key=True, index=True, autoincrement=True)
+    teacher_user_id   = Column(BigInteger, ForeignKey("user.id"), nullable=True, unique=True)
+    teacher_gennis_id = Column(Integer, nullable=True)
+    name              = Column(String(255), nullable=False)
+    subject_display   = Column(String(255), nullable=True)
+    photo             = Column(String(500), nullable=True)
+    bio               = Column(Text, nullable=True)
+    telegram          = Column(String(500), nullable=True)
+    instagram         = Column(String(500), nullable=True)
+    facebook          = Column(String(500), nullable=True)
+    display_order     = Column(Integer, nullable=False, default=0)
+    created_at        = Column(DateTime, server_default=func.now())
+    updated_at        = Column(DateTime, server_default=func.now(), onupdate=func.now())
+    deleted           = Column(Boolean, nullable=False, default=False)
+
+    teacher_user = relationship("User")
+    results = relationship(
+        "GennisWebsiteTeacherResult", back_populates="teacher_profile", cascade="all, delete-orphan"
+    )
+
+
+class GennisWebsiteTeacherResult(Base):
+    """One showcased student result under a public teacher profile."""
+
+    __tablename__ = "gennis_website_teacher_result_v2"
+
+    id                 = Column(BigInteger, primary_key=True, index=True, autoincrement=True)
+    teacher_profile_id = Column(BigInteger, ForeignKey("gennis_website_teacher_profile_v2.id", ondelete="CASCADE"), nullable=False, index=True)
+    comment            = Column(Text, nullable=True)
+    student_photo      = Column(String(500), nullable=True)
+    result_image       = Column(String(500), nullable=True)
+    student_name       = Column(String(255), nullable=True)
+    created_at         = Column(DateTime, server_default=func.now())
+
+    teacher_profile = relationship("GennisWebsiteTeacherProfile", back_populates="results")
