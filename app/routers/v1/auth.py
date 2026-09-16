@@ -295,6 +295,53 @@ def login(
     )
 
 
+# One-off SSO bridge: gennis-v2 and this project already share the same
+# SECRET_KEY (tokens are issued here and verified there for the mission-
+# attachment executor lookup, see gennis-v2's core/config.py comment) — so a
+# short-lived token minted here with the exact claim shape gennis-v2's
+# get_current_user expects (sub, user_id, system, role, roles, type=access)
+# is a fully valid gennis-v2 session on arrival, no new endpoint needed on
+# that side. user_id below is gennis-v2's OWN "user" table id for the SMM
+# account (smm_tis, created via gennis-v2/scripts/create_website_admin_
+# account.py) — not this project's id for the same person — since gennis-v2
+# looks accounts up in its own DB. Hardcoded rather than a lookup table
+# because there is exactly one such linked account today; extend this map
+# (or replace it with a real link table) if more roles/people need it.
+GENNIS_SSO_TARGETS = {
+    "smm": {"user_id": 19605, "name": "SMM Gennis", "role": "smm", "roles": ["smm"]},
+}
+GENNIS_SSO_ALLOWED_ROLES = ("owner", "admin", "smm")
+
+
+class GennisSsoOut(BaseModel):
+    url: str
+
+
+@router.get('/gennis-sso', response_model=GennisSsoOut)
+def gennis_sso(current_user: models.User = Depends(get_current_user)):
+    """Mint a ~2-minute gennis-v2 session token for the current user and
+    return the gennis-home URL that redeems it, so "Gennis web site change"
+    can drop the user straight into /platform already signed in."""
+    if current_user.role not in GENNIS_SSO_ALLOWED_ROLES:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No linked gennis-home account for this role")
+
+    target = GENNIS_SSO_TARGETS.get(current_user.role)
+    if not target:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No linked gennis-home account for this role")
+
+    token_data = {
+        "sub": current_user.email or current_user.username,
+        "user_id": target["user_id"],
+        "external_id": target["user_id"],
+        "system": "management",
+        "name": target["name"],
+        "role": target["role"],
+        "roles": target["roles"],
+    }
+    sso_token = create_access_token(data=token_data, expires_delta=timedelta(minutes=2))
+    return GennisSsoOut(url=f"https://gennis.uz/sso?token={sso_token}")
+
+
 @router.post('/google', response_model=AuthResponse)
 def google_auth(auth_request: GoogleAuthRequest, db: Session = Depends(get_db)):
     """Authenticate with Google OAuth"""
