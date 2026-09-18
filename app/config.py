@@ -7,6 +7,12 @@ load_dotenv()
 class Settings:
     SECRET_KEY: str = os.getenv("SECRET_KEY", "change-me")
     ALGORITHM: str = os.getenv("ALGORITHM", "HS256")
+    # Dedicated key for the management-v2 -> gennis-v2 SSO bridge (see
+    # gennis-v2's /auth/sso-exchange). Must match SSO_SHARED_SECRET in
+    # gennis-v2's .env — deliberately its own key, not SECRET_KEY above,
+    # so this one narrow handoff can't be used to forge a full session on
+    # either project.
+    SSO_SHARED_SECRET: str = os.getenv("SSO_SHARED_SECRET", "change-me")
     ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "60"))
     REFRESH_TOKEN_EXPIRE_DAYS: int = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", "30"))
     GOOGLE_CLIENT_ID: str = os.getenv("GOOGLE_CLIENT_ID", "")

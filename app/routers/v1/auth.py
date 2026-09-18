@@ -12,6 +12,7 @@ from app import models
 from app.database import get_db
 from app.dependencies import get_current_user
 from app.services.user_lookup import find_user_by_username_or_email
+from jose import jwt as jose_jwt
 from app.core.security import (
     verify_password,
     get_password_hash,
@@ -295,18 +296,18 @@ def login(
     )
 
 
-# One-off SSO bridge: gennis-v2 and this project already share the same
-# SECRET_KEY (tokens are issued here and verified there for the mission-
-# attachment executor lookup, see gennis-v2's core/config.py comment) — so a
-# short-lived token minted here with the exact claim shape gennis-v2's
-# get_current_user expects (sub, user_id, system, role, roles, type=access)
-# is a fully valid gennis-v2 session on arrival, no new endpoint needed on
-# that side. user_id below is gennis-v2's OWN "user" table id for the SMM
-# account (smm_tis, created via gennis-v2/scripts/create_website_admin_
-# account.py) — not this project's id for the same person — since gennis-v2
-# looks accounts up in its own DB. Hardcoded rather than a lookup table
-# because there is exactly one such linked account today; extend this map
-# (or replace it with a real link table) if more roles/people need it.
+# SSO bridge to gennis-home/gennis-v2: mints a short-lived token signed with
+# SSO_SHARED_SECRET (see app/config.py) — a key dedicated to this one
+# handoff, distinct from SECRET_KEY which signs every real session here and
+# turned out NOT to match gennis-v2's own SECRET_KEY anyway. gennis-v2's
+# /auth/sso-exchange verifies this token against that same shared secret and
+# trades it for a real gennis-v2 session on the linked local account.
+# user_id below is gennis-v2's OWN "user" table id for the SMM account
+# (smm_tis, created via gennis-v2/scripts/create_website_admin_account.py)
+# — not this project's id for the same person — since gennis-v2 looks
+# accounts up in its own DB. Hardcoded rather than a lookup table because
+# there is exactly one such linked account today; extend this map (or
+# replace it with a real link table) if more roles/people need it.
 GENNIS_SSO_TARGETS = {
     "smm": {"user_id": 19605, "name": "SMM Gennis", "role": "smm", "roles": ["smm"]},
 }
@@ -319,9 +320,10 @@ class GennisSsoOut(BaseModel):
 
 @router.get('/gennis-sso', response_model=GennisSsoOut)
 def gennis_sso(current_user: models.User = Depends(get_current_user)):
-    """Mint a ~2-minute gennis-v2 session token for the current user and
-    return the gennis-home URL that redeems it, so "Gennis web site change"
-    can drop the user straight into /platform already signed in."""
+    """Mint a ~2-minute SSO bridge token for the current user and return the
+    gennis-home URL that redeems it (via gennis-v2's /auth/sso-exchange), so
+    "Gennis web site change" can drop the user straight into /platform
+    already signed in."""
     if current_user.role not in GENNIS_SSO_ALLOWED_ROLES:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No linked gennis-home account for this role")
 
@@ -330,6 +332,7 @@ def gennis_sso(current_user: models.User = Depends(get_current_user)):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No linked gennis-home account for this role")
 
     token_data = {
+        "type": "sso",
         "sub": current_user.email or current_user.username,
         "user_id": target["user_id"],
         "external_id": target["user_id"],
@@ -337,8 +340,9 @@ def gennis_sso(current_user: models.User = Depends(get_current_user)):
         "name": target["name"],
         "role": target["role"],
         "roles": target["roles"],
+        "exp": datetime.utcnow() + timedelta(minutes=2),
     }
-    sso_token = create_access_token(data=token_data, expires_delta=timedelta(minutes=2))
+    sso_token = jose_jwt.encode(token_data, settings.SSO_SHARED_SECRET, algorithm=settings.ALGORITHM)
     return GennisSsoOut(url=f"https://gennis.uz/sso?token={sso_token}")
 
 
